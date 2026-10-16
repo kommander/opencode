@@ -6,7 +6,7 @@ import path from "node:path"
 import { HttpServer } from "effect/http"
 import { it } from "../../core/test/lib/effect"
 import { ServerProcess } from "../src/process"
-import { received } from "./fixture/peer-provider"
+import { received } from "./fixture/server-plugin"
 
 const start = (password: string, config: string) =>
   ServerProcess.start<never, never>({
@@ -31,15 +31,17 @@ it.live(
         Bun.write(
           path.join(config, "opencode.jsonc"),
           JSON.stringify({
-            peers: [
-              {
-                package: import.meta.dir + "/fixture/peer-provider.ts",
-                options: {
-                  target: HttpServer.formatAddress(remote.address),
-                  authorization: `Basic ${btoa("opencode:remote")}`,
+            server: {
+              plugins: [
+                {
+                  package: import.meta.dir + "/fixture/server-plugin.ts",
+                  options: {
+                    target: HttpServer.formatAddress(remote.address),
+                    authorization: `Basic ${btoa("opencode:remote")}`,
+                  },
                 },
-              },
-            ],
+              ],
+            },
           }),
         ),
       )

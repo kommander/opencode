@@ -1,24 +1,9 @@
 export * as ServerPeers from "./peers"
 
-import { ConfigDiscovery } from "@opencode/core/config/discovery"
-import type { PeerProvider } from "@opencode/plugin/peer"
-import { Global } from "@opencode/util/global"
-import { Effect, FileSystem, Schema } from "effect"
+import type { Peers } from "@opencode/plugin/peer"
+import { Effect } from "effect"
 import { HttpClient, HttpClientRequest, HttpServerRequest, HttpServerResponse } from "effect/http"
 import { Socket } from "effect/socket"
-import { parse } from "jsonc-parser"
-import path from "path"
-
-const GlobalConfig = Schema.Struct({
-  peers: Schema.optional(
-    Schema.Array(
-      Schema.Struct({
-        package: Schema.String,
-        options: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)),
-      }),
-    ),
-  ),
-})
 
 const PEER_PATH = /^\/api\/peers\/([^/]+)(\/.*)$/
 
@@ -32,33 +17,9 @@ const forward = Effect.fnUntraced(function* (from: Socket.Socket, to: Socket.Soc
   while (true) yield* writer.writeAll(yield* reader.pull)
 })
 
-/**
- * Starts the providers listed under `peers` in the global config for the lifetime of the current scope.
- * Project config cannot add providers.
- */
-export const start = Effect.fn("ServerPeers.start")(function* (server: {
-  url: string
-  headers: Record<string, string>
-}) {
-  const global = yield* Global.Service
-  const fs = yield* FileSystem.FileSystem
+/** Serves `/api/peers` from the peers that server plugins provide. */
+export const make = Effect.fn("ServerPeers.make")(function* (providers: readonly Peers[]) {
   const http = yield* HttpClient.HttpClient
-  const configs = yield* Effect.forEach(ConfigDiscovery.names, (name) =>
-    Effect.gen(function* () {
-      const file = path.join(global.config, name)
-      if (!(yield* fs.exists(file))) return {}
-      return yield* Schema.decodeUnknownEffect(GlobalConfig)(parse(yield* fs.readFileString(file)))
-    }),
-  )
-  const providers = yield* Effect.forEach(configs.findLast((config) => config.peers)?.peers ?? [], (entry) =>
-    Effect.acquireRelease(
-      Effect.tryPromise(async () => {
-        const module: { default: PeerProvider } = await import(entry.package)
-        return module.default({ options: entry.options ?? {}, server })
-      }),
-      (peers) => Effect.promise(() => peers.close()),
-    ),
-  )
 
   return Effect.gen(function* () {
     const request = yield* HttpServerRequest.HttpServerRequest

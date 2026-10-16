@@ -19,6 +19,7 @@ import { withoutParentSpan } from "./request-tracing"
 import { createRoutes } from "./routes"
 import { ServerInfo } from "./server-info"
 import { ServerPeers } from "./peers"
+import { ServerPlugins } from "./plugins"
 import { Status } from "./service-status"
 import type { ServerOptions } from "./options"
 
@@ -111,10 +112,14 @@ export const start = Effect.fn("ServerProcess.start")(function* <E, R>(
       )
     }
     const routes = Context.get(context, HttpRouter.HttpRouter).asHttpEffect()
-    const peers = yield* ServerPeers.start({
+    const peers = yield* ServerPlugins.start({
       url: localURLs()[0],
       headers: { authorization: `Basic ${btoa(`opencode:${password}`)}` },
-    }).pipe(Effect.provide(context), Effect.provideService(Scope.Scope, applicationScope))
+    }).pipe(
+      Effect.flatMap((plugins) => ServerPeers.make(plugins.peers)),
+      Effect.provide(context),
+      Effect.provideService(Scope.Scope, applicationScope),
+    )
     yield* Ref.set(
       application,
       Option.some(
