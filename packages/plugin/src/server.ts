@@ -18,6 +18,13 @@ export interface Context {
     /** Lists the peers at `/api/peers` and proxies `/api/peers/:id/*` to them. */
     readonly provide: (peers: Peers) => void
   }
+  readonly routes: {
+    /**
+     * Serves `/api/plugins/<plugin id>/*` with `fetch`. Requests are authenticated by the server first and carry the
+     * path below that prefix.
+     */
+    readonly serve: (fetch: (request: Request) => Promise<Response>) => void
+  }
 }
 
 export type Cleanup = () => Promise<void> | void

@@ -21,7 +21,7 @@ const start = (password: string, config: string) =>
   })
 
 it.live(
-  "proxies HTTP, SSE and WebSockets to provider peers without forwarding local credentials",
+  "serves server plugin routes and proxies HTTP, SSE and WebSockets to plugin peers without local credentials",
   () =>
     Effect.gen(function* () {
       const remote = yield* start("remote", process.env.XDG_CONFIG_HOME!)
@@ -52,6 +52,13 @@ it.live(
         fetch(base + path, { ...init, headers: { authorization: `Basic ${token}`, ...init.headers } })
 
       yield* Effect.promise(async () => {
+        expect((await fetch(base + "/api/plugins/test-peers/hello")).status).toBe(401)
+        expect((await request("/api/plugins/missing/hello")).status).toBe(404)
+        expect(await (await request("/api/plugins/test-peers/hello", { method: "POST", body: "hi" })).json()).toEqual({
+          method: "POST",
+          path: "/hello",
+          body: "hi",
+        })
         expect((await fetch(base + "/api/peers")).status).toBe(401)
         expect(await (await request("/api/peers")).json()).toEqual([{ id: "remote", name: "Remote", status: "online" }])
         expect((await request("/api/peers/missing/api/info")).status).toBe(404)

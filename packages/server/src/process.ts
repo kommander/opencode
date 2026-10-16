@@ -112,20 +112,21 @@ export const start = Effect.fn("ServerProcess.start")(function* <E, R>(
       )
     }
     const routes = Context.get(context, HttpRouter.HttpRouter).asHttpEffect()
-    const peers = yield* ServerPlugins.start({
+    const plugins = yield* ServerPlugins.start({
       url: localURLs()[0],
       headers: { authorization: `Basic ${btoa(`opencode:${password}`)}` },
-    }).pipe(
-      Effect.flatMap((plugins) => ServerPeers.make(plugins.peers)),
-      Effect.provide(context),
-      Effect.provideService(Scope.Scope, applicationScope),
-    )
+    }).pipe(Effect.provide(context), Effect.provideService(Scope.Scope, applicationScope))
+    const peers = yield* ServerPeers.make(plugins.peers).pipe(Effect.provide(context))
+    const pluginRoutes = ServerPlugins.serve(plugins.routes)
     yield* Ref.set(
       application,
       Option.some(
-        Effect.flatMap(HttpServerRequest.HttpServerRequest, (request) =>
-          ServerPeers.matches(new URL(request.url, "http://localhost").pathname) ? peers : routes,
-        ),
+        Effect.flatMap(HttpServerRequest.HttpServerRequest, (request) => {
+          const pathname = new URL(request.url, "http://localhost").pathname
+          if (ServerPeers.matches(pathname)) return peers
+          if (ServerPlugins.matches(pathname)) return pluginRoutes
+          return routes
+        }),
       ),
     )
     yield* status.ready

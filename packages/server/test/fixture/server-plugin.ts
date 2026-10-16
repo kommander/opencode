@@ -6,6 +6,9 @@ export const received: Headers[] = []
 export default ServerPlugin.define({
   id: "test-peers",
   setup: (context) => {
+    context.routes.serve(async (request) =>
+      Response.json({ method: request.method, path: new URL(request.url).pathname, body: await request.text() }),
+    )
     const target = String(context.options.target)
     const authorization = String(context.options.authorization)
     const proxy = Bun.serve<{ remote: WebSocket; pending: (string | Buffer)[] }>({
