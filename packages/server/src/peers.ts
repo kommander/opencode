@@ -1,12 +1,9 @@
 export * as Peers from "./peers"
 
 import type { BiStream, Connection } from "@number0/iroh/index.js"
-import { Bus } from "@opencode/core/bus"
-import { Credential } from "@opencode/core/credential"
-import { Integration } from "@opencode/schema/integration"
+import { Peer } from "@opencode/core/peer"
 import { Global } from "@opencode/util/global"
-import { Context, Effect, FiberSet, Layer, Schedule, Schema, Scope, Semaphore, Stream } from "effect"
-import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http"
+import { Context, Effect, FiberSet, Layer, Schema, Scope, Semaphore } from "effect"
 import { NetAddress } from "effect/net"
 import { Socket } from "effect/socket"
 import { randomBytes } from "node:crypto"
@@ -35,17 +32,10 @@ export interface Gateway {
 }
 
 export interface Options {
-  readonly url: string
   /** Name shown to the account's other servers; defaults to the hostname. */
   readonly name?: string
   readonly target: { readonly hostname: string; readonly port: number }
   readonly version?: string
-}
-
-export class SignedOut extends Schema.TaggedError<SignedOut>()("Peers.SignedOut", {}) {
-  override get message() {
-    return "Sign in to OpenCode Console to use peer connections"
-  }
 }
 
 export class Unavailable extends Schema.TaggedError<Unavailable>()("Peers.Unavailable", {
@@ -60,25 +50,14 @@ export class NotFound extends Schema.TaggedError<NotFound>()("Peers.NotFound", {
 }
 
 export interface Interface {
-  /** The signed-in account's other servers listed in the peer directory. */
-  readonly list: () => Effect.Effect<ReadonlyArray<Peer>, SignedOut | Unavailable>
+  /** Peers that server-wide plugins added to the peer list. */
+  readonly list: () => Effect.Effect<ReadonlyArray<Peer>, Unavailable>
   /** Returns a loopback URL and Basic credentials that reach the peer's server. */
-  readonly connect: (id: string) => Effect.Effect<Gateway, SignedOut | Unavailable | NotFound>
+  readonly connect: (id: string) => Effect.Effect<Gateway, Unavailable | NotFound>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/Peers") {}
 
-const Directory = Schema.Struct({
-  instances: Schema.Array(
-    Schema.Struct({
-      id: Schema.String,
-      name: Schema.String,
-      version: Schema.optional(Schema.String),
-      address: Schema.Struct({ relay: Schema.NullOr(Schema.String), addresses: Schema.Array(Schema.String) }),
-      updated: Schema.Number,
-    }),
-  ),
-})
 const Hello = Schema.fromJsonString(Schema.Struct({ token: Schema.String }))
 
 const unavailable = (message: string) =>
@@ -110,11 +89,8 @@ const make = Effect.fnUntraced(function* (options: Options) {
   const { makeNet } = yield* Effect.promise(() => import("@effect/platform-node/NodeSocket"))
   const NodeSocketServer = yield* Effect.promise(() => import("@effect/platform-node/NodeSocketServer"))
   const global = yield* Global.Service
-  const credentials = yield* Credential.Service
-  const bus = yield* Bus.Service
+  const registry = yield* Peer.Service
   const auth = yield* ServerAuth.Config
-  const http = yield* HttpClient.HttpClient
-  const base = options.url.replace(/\/+$/, "")
 
   const file = path.join(global.data, "peer.key")
   const secret = yield* Effect.tryPromise({
@@ -145,73 +121,30 @@ const make = Effect.fnUntraced(function* (options: Options) {
   )
   const self = endpoint.id().toString()
 
-  const headers = Effect.fn("Peers.headers")(function* () {
-    // Listings order the integration's selected credential last.
-    const value = (yield* credentials.list(Integration.ID.make("opencode"))).at(-1)?.value
-    if (value?.type !== "oauth" && value?.type !== "key") return yield* new SignedOut()
-    const orgID = value.metadata?.orgID
-    const accountID = value.metadata?.accountID
-    return {
-      authorization: `Bearer ${value.type === "oauth" ? value.access : value.key}`,
-      ...(typeof orgID === "string" ? { "x-org-id": orgID } : {}),
-      ...(typeof accountID === "string" ? { "x-account-id": accountID } : {}),
-    }
-  })
-
-  const send = Effect.fn("Peers.send")(function* (request: HttpClientRequest.HttpClientRequest) {
-    return yield* http.execute(HttpClientRequest.setHeaders(request, yield* headers())).pipe(
-      Effect.flatMap(HttpClientResponse.filterStatusOk),
-      Effect.mapError((cause) => new Unavailable({ message: "Peer directory request failed", cause })),
-    )
-  })
-
-  const instances = Effect.fn("Peers.instances")(function* () {
-    const response = yield* send(HttpClientRequest.get(`${base}/v1/instances`))
-    const directory = yield* HttpClientResponse.schemaBodyJson(Directory)(response).pipe(
-      Effect.mapError((cause) => new Unavailable({ message: "Peer directory returned an invalid response", cause })),
-    )
-    return directory.instances
-  })
-
-  const announce = Effect.fn("Peers.announce")(function* () {
-    // Waits for a home relay on first use only; direct addresses are still announced without one.
-    yield* Effect.promise(() => endpoint.online()).pipe(Effect.timeout("10 seconds"), Effect.ignore)
-    const current = endpoint.addr()
-    // Wildcard sockets are not dialable; loopback forms make same-host peers work immediately.
-    const bound = endpoint
-      .boundSockets()
-      .map((item) => item.replace(/^0\.0\.0\.0:/, "127.0.0.1:").replace(/^\[::\]:/, "[::1]:"))
-    yield* send(
-      HttpClientRequest.put(`${base}/v1/instances/${self}`).pipe(
-        HttpClientRequest.bodyJsonUnsafe({
-          name: options.name || hostname(),
-          version: options.version,
-          address: { relay: current.relayUrl(), addresses: [...new Set([...current.directAddresses(), ...bound])] },
-        }),
-      ),
-    )
-  })
-
-  yield* Effect.addFinalizer(() =>
-    send(HttpClientRequest.delete(`${base}/v1/instances/${self}`)).pipe(Effect.timeout("3 seconds"), Effect.ignore),
+  yield* registry.provideSelf(
+    Effect.gen(function* () {
+      // Waits for a home relay on first use only; direct addresses are still announced without one.
+      yield* Effect.promise(() => endpoint.online()).pipe(Effect.timeout("10 seconds"), Effect.ignore)
+      const current = endpoint.addr()
+      // Wildcard sockets are not dialable; loopback forms make same-host peers work immediately.
+      const bound = endpoint
+        .boundSockets()
+        .map((item) => item.replace(/^0\.0\.0\.0:/, "127.0.0.1:").replace(/^\[::\]:/, "[::1]:"))
+      return {
+        id: self,
+        name: options.name || hostname(),
+        version: options.version,
+        address: { relay: current.relayUrl(), addresses: [...new Set([...current.directAddresses(), ...bound])] },
+      }
+    }),
   )
-  const announced = announce().pipe(
-    Effect.catchTag("Peers.SignedOut", () => Effect.void),
-    Effect.catch((error) => Effect.logWarning("peer announce failed", { error: error.message })),
-  )
-  yield* announced.pipe(Effect.repeat(Schedule.spaced("60 seconds")), Effect.forkScoped)
-  // Announce right after a Console login instead of waiting for the next cycle.
-  yield* bus.subscribe(Credential.Event.Switched).pipe(
-    Stream.filter((event) => event.data.integrationID === Integration.ID.make("opencode")),
-    Stream.runForEach(() => announced),
-    Effect.forkScoped({ startImmediately: true }),
-  )
+  const peers = registry.list().pipe(Effect.map((list) => list.filter((peer) => peer.id !== self)))
 
-  // Inbound: only the same account's directory instances get a session token and a pipe to this server.
+  // Inbound: only servers in the peer list get a session token and a pipe to this server.
   const serve = Effect.fn("Peers.serve")(
     function* (connection: Connection) {
       const remote = connection.remoteId().toString()
-      if (!(yield* instances()).some((instance) => instance.id === remote)) return
+      if (!(yield* peers).some((peer) => peer.id === remote)) return
       const token = ServerAuth.issueSession(auth)
       if (token === undefined) return
       const control = yield* Effect.tryPromise(() => connection.acceptBi())
@@ -249,7 +182,7 @@ const make = Effect.fnUntraced(function* (options: Options) {
   yield* Effect.addFinalizer(() => Effect.sync(() => gateways.forEach((gateway) => gateway.connection.close(0n, []))))
 
   const dial = Effect.fn("Peers.dial")(function* (id: string) {
-    const instance = (yield* instances()).find((item) => item.id === id && item.id !== self)
+    const instance = (yield* peers).find((peer) => peer.id === id)
     if (!instance) return yield* new NotFound({ id })
     const connection = yield* Effect.tryPromise({
       try: async () =>
@@ -309,15 +242,13 @@ const make = Effect.fnUntraced(function* (options: Options) {
   return Service.of({
     list: Effect.fn("Peers.list")(function* () {
       const now = Date.now()
-      return (yield* instances())
-        .filter((instance) => instance.id !== self)
-        .map((instance) => ({
-          id: instance.id,
-          name: instance.name,
-          version: instance.version,
-          online: now - instance.updated < ONLINE_WINDOW_MS,
-          updated: instance.updated,
-        }))
+      return (yield* peers).map((instance) => ({
+        id: instance.id,
+        name: instance.name,
+        version: instance.version,
+        online: now - instance.updated < ONLINE_WINDOW_MS,
+        updated: instance.updated,
+      }))
     }),
     connect: Effect.fn("Peers.connect")(
       function* (id) {

@@ -33,7 +33,7 @@ import { Money } from "@opencode/schema/money"
 
 const defaultServer = "https://opencode.ai/console"
 const clientID = "opencode-cli"
-const methodID = Integration.MethodID.make("device")
+export const methodID = Integration.MethodID.make("device")
 // Drop statements whose action or effect is a value this version does not know, so a newer Console can
 // extend either enum. Malformed statements still fail validation.
 const RemotePolicies = Schema.Array(Schema.Unknown).pipe(
@@ -127,7 +127,7 @@ class SignedOutError extends Schema.TaggedError<SignedOutError>()("OpencodeConso
   }
 }
 
-function oauth(http: HttpClient.HttpClient) {
+export function oauth(http: HttpClient.HttpClient) {
   return {
     integrationID: Integration.ID.make("opencode"),
     method: {
@@ -338,7 +338,10 @@ export const OpencodePlugin = define<
         models: offer.models,
         workspace: offer.workspace,
         session: (input) =>
-          send("/live/sessions", { session: { ...input.session, model: input.model }, transport: input.transport }).pipe(
+          send("/live/sessions", {
+            session: { ...input.session, model: input.model },
+            transport: input.transport,
+          }).pipe(
             Effect.flatMap((text) =>
               Schema.decodeUnknownEffect(LiveSession)(text).pipe(
                 Effect.mapError(
@@ -690,7 +693,7 @@ function organizationName(credential: Credential.Value) {
   return typeof credential.metadata?.orgName === "string" ? credential.metadata.orgName : undefined
 }
 
-function credentialHeaders(value: Credential.Key | Credential.OAuth): Record<string, string> {
+export function credentialHeaders(value: Credential.Key | Credential.OAuth): Record<string, string> {
   const orgID = value.metadata?.orgID
   return {
     authorization: `Bearer ${value.type === "oauth" ? value.access : value.key}`,

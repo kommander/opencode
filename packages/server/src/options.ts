@@ -44,10 +44,9 @@ export const ServerOptions = Schema.Struct({
       fff: Schema.optional(Schema.Boolean),
     }),
   ),
-  // Peer directory for iroh peer connections. Only a listening ServerProcess enables them.
+  // iroh peer connections. Only a listening ServerProcess enables them; server-wide plugins fill the peer list.
   peers: Schema.optional(
     Schema.Struct({
-      url: Schema.String,
       name: Schema.optional(Schema.String),
     }),
   ),

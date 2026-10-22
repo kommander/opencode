@@ -141,11 +141,7 @@ const processEffect = Effect.fnUntraced(function* (options: Options) {
                 ? process.platform !== "win32"
                 : !truthy(process.env.OPENCODE_DISABLE_FFF),
           },
-          // Hard-coded for now: the opencode-cloud directory on workers.dev. OPENCODE_PEERS_URL overrides it.
-          peers: {
-            url: process.env.OPENCODE_PEERS_URL || "https://opencode-peers.anomalyco.workers.dev",
-            name: process.env.OPENCODE_PEER_NAME,
-          },
+          peers: { name: process.env.OPENCODE_PEER_NAME },
         },
         serviceOptions === undefined
           ? undefined

@@ -9,6 +9,8 @@ import { Bus } from "@opencode/core/bus"
 import { EventLogger } from "@opencode/core/event-logger"
 import { FileSystemSearch } from "@opencode/core/filesystem/search"
 import { Credential } from "@opencode/core/credential"
+import { Peer } from "@opencode/core/peer"
+import { PluginGlobal } from "@opencode/core/plugin/global"
 import { Config } from "@opencode/core/config"
 import { PermissionSaved } from "@opencode/core/permission/saved"
 import { PtyTicket } from "@opencode/core/pty/ticket"
@@ -68,6 +70,7 @@ const applicationServiceNodes = [
   PtyTicket.node,
   PersistentPty.node,
   Credential.node,
+  Peer.node,
   WellKnown.node,
   ServerPairing.node,
   LocationServiceMap.node,
@@ -182,7 +185,6 @@ function makeRoutes<AuthError, AuthServices>(
       const peers =
         options.peers && peerTarget
           ? Peers.layer({
-              url: options.peers.url,
               name: options.peers.name,
               target: peerTarget,
               version: options.app?.version,
@@ -206,7 +208,9 @@ function makeRoutes<AuthError, AuthServices>(
         Layer.provideMerge(services),
         Layer.provideMerge(HttpRouter.layer),
       )
-      return Layer.merge(api, V1Migration.layer.pipe(Layer.provide(services)))
+      // Server-wide plugin phases run only in a real server process, which is when a peer target is known.
+      const plugins = peerTarget ? PluginGlobal.layer.pipe(Layer.provide(services)) : Layer.empty
+      return Layer.mergeAll(api, V1Migration.layer.pipe(Layer.provide(services)), plugins)
     }),
   )
 }
