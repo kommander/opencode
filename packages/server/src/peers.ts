@@ -25,6 +25,7 @@ export interface Peer {
   readonly name: string
   readonly version?: string
   readonly online: boolean
+  readonly updated: number
 }
 
 /** A loopback URL that reaches the peer, and the token its server accepts as the Basic password for user "opencode". */
@@ -315,6 +316,7 @@ const make = Effect.fnUntraced(function* (options: Options) {
           name: instance.name,
           version: instance.version,
           online: now - instance.updated < ONLINE_WINDOW_MS,
+          updated: instance.updated,
         }))
     }),
     connect: Effect.fn("Peers.connect")(

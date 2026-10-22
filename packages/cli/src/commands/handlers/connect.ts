@@ -42,7 +42,9 @@ const choose = Effect.fn("cli.connect.choose")(function* (input: Runtime.Input<t
       options: peers.map((peer) => ({
         value: peer.id,
         label: peer.name,
-        hint: `${peer.id.slice(0, 8)}${peer.online ? "" : " · offline"}`,
+        hint: [peer.id.slice(0, 8), peer.version, peer.online ? "online" : `seen ${ago(peer.updated)}`]
+          .filter(Boolean)
+          .join(" · "),
       })),
     }),
   )
@@ -53,3 +55,10 @@ const choose = Effect.fn("cli.connect.choose")(function* (input: Runtime.Input<t
     Effect.tapCause(() => Effect.sync(() => progress.stop("Failed to connect", 1))),
   )
 })
+
+function ago(time: number) {
+  const minutes = Math.round((Date.now() - time) / 60_000)
+  if (minutes < 60) return `${minutes}m ago`
+  if (minutes < 48 * 60) return `${Math.round(minutes / 60)}h ago`
+  return `${Math.round(minutes / 1440)}d ago`
+}

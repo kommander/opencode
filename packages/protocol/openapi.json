@@ -17540,9 +17540,20 @@
           },
           "online": {
             "type": "boolean"
+          },
+          "updated": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string",
+                "enum": ["Infinity", "-Infinity", "NaN"]
+              }
+            ]
           }
         },
-        "required": ["id", "name", "online"],
+        "required": ["id", "name", "online", "updated"],
         "additionalProperties": false
       },
       "PeerNotFoundErrorEncoded": {

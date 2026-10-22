@@ -246,7 +246,7 @@ export type McpResourceTemplate = {
 
 export type CredentialKey = { type: "key"; key: string; metadata?: { [x: string]: JsonValue } }
 
-export type PeerInfo = { id: string; name: string; version?: string | undefined; online: boolean }
+export type PeerInfo = { id: string; name: string; version?: string | undefined; online: boolean; updated: number }
 
 export type PeerConnection = { url: string; token: string }
 
