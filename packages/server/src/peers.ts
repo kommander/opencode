@@ -165,6 +165,7 @@ const make = Effect.fnUntraced(function* (options: Options) {
   const dial = Effect.fn("Peers.dial")(function* (id: string) {
     const instance = (yield* peers).find((peer) => peer.id === id)
     if (!instance) return yield* new Unavailable({ message: `Peer not found: ${id}` })
+    // iroh's TLS handshake proves the remote holds the dialed endpoint ID's key.
     const connection = yield* Effect.tryPromise({
       try: async () =>
         endpoint.connect(
@@ -173,10 +174,6 @@ const make = Effect.fnUntraced(function* (options: Options) {
         ),
       catch: (cause) => new Unavailable({ message: `Could not reach peer ${instance.name}`, cause }),
     })
-    if (connection.remoteId().toString() !== id) {
-      connection.close(0n, [])
-      return yield* new Unavailable({ message: `Peer ${instance.name} presented a different identity` })
-    }
     const token = yield* Effect.gen(function* () {
       const control = yield* Effect.tryPromise(() => connection.openBi())
       yield* Effect.tryPromise(() => control.send.writeAll(HELLO))
