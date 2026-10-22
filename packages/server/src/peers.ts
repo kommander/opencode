@@ -1,6 +1,6 @@
 export * as Peers from "./peers"
 
-import type { BiStream, Connection } from "@number0/iroh/index.js"
+import type { BiStream, Connection } from "@opencode-ai/iroh"
 import { Peer } from "@opencode/core/peer"
 import type { PeerEntry } from "@opencode/plugin/effect/global"
 import { Global } from "@opencode/util/global"
@@ -13,8 +13,8 @@ import { hostname } from "node:os"
 import path from "node:path"
 import { ServerAuth } from "./auth"
 
-const ALPN = Array.from(new TextEncoder().encode("opencode/peer/1"))
-const HELLO = Array.from(new TextEncoder().encode("opencode/peer/1 hello"))
+const ALPN = "opencode/peer/1"
+const HELLO = new TextEncoder().encode("opencode/peer/1 hello")
 const CHUNK = 64 * 1024
 
 /** A loopback URL that reaches the peer, and the token its server accepts as the Basic password for user "opencode". */
@@ -65,8 +65,8 @@ export const layer = (options: Options) =>
 
 const make = Effect.fnUntraced(function* (options: Options) {
   // Loaded lazily so runtimes that never enable peers do not load the native binding.
-  const { Endpoint, EndpointAddr, EndpointId, RelayMode } = yield* Effect.tryPromise({
-    try: () => import("@number0/iroh/index.js"),
+  const { bind } = yield* Effect.tryPromise({
+    try: () => import("@opencode-ai/iroh"),
     catch: (cause) => new Unavailable({ message: "Failed to load the iroh binding", cause }),
   })
   const { makeNet } = yield* Effect.promise(() => import("@effect/platform-node/NodeSocket"))
@@ -89,20 +89,13 @@ const make = Effect.fnUntraced(function* (options: Options) {
   })
   const endpoint = yield* Effect.acquireRelease(
     Effect.tryPromise({
-      try: () => {
-        // The minimal preset publishes nothing to public discovery; the directory carries addresses instead.
-        const builder = Endpoint.builder()
-        builder.applyMinimal()
-        builder.secretKey(Array.from(secret))
-        builder.alpns([ALPN])
-        builder.relayMode(RelayMode.defaultMode())
-        return builder.bind()
-      },
+      // Publishes nothing to public discovery; the directory carries addresses instead.
+      try: () => bind({ secretKey: secret, alpn: ALPN }),
       catch: (cause) => new Unavailable({ message: "Failed to start the peer endpoint", cause }),
     }),
     (endpoint) => Effect.promise(() => endpoint.close()),
   )
-  const self = endpoint.id().toString()
+  const self = endpoint.id()
 
   yield* registry.setSelf(
     Effect.gen(function* () {
@@ -118,7 +111,7 @@ const make = Effect.fnUntraced(function* (options: Options) {
         kind: "server" as const,
         name: options.name || hostname(),
         version: options.version,
-        address: { relay: current.relayUrl(), addresses: [...new Set([...current.directAddresses(), ...bound])] },
+        address: { relay: current.relay, addresses: [...new Set([...current.addresses, ...bound])] },
       }
     }),
   )
@@ -135,7 +128,7 @@ const make = Effect.fnUntraced(function* (options: Options) {
       if (token === undefined) return
       const control = yield* Effect.tryPromise(() => connection.acceptBi())
       yield* Effect.tryPromise(() => control.recv.readToEnd(256))
-      yield* Effect.tryPromise(() => control.send.writeAll(Array.from(new TextEncoder().encode(token))))
+      yield* Effect.tryPromise(() => control.send.writeAll(new TextEncoder().encode(token)))
       yield* Effect.tryPromise(() => control.send.finish())
       while (true) {
         const stream = yield* Effect.tryPromise(() => connection.acceptBi())
@@ -144,16 +137,16 @@ const make = Effect.fnUntraced(function* (options: Options) {
       }
     },
     Effect.scoped,
-    (effect, connection) => effect.pipe(Effect.ignore, Effect.ensuring(Effect.sync(() => connection.close(0n, [])))),
+    (effect, connection) => effect.pipe(Effect.ignore, Effect.ensuring(Effect.sync(() => connection.close()))),
   )
   const accepted = yield* FiberSet.make()
   yield* Effect.gen(function* () {
     while (true) {
-      const pending = yield* Effect.tryPromise(() => endpoint.acceptNext()).pipe(Effect.orElseSucceed(() => null))
+      const pending = yield* Effect.tryPromise(() => endpoint.accept()).pipe(Effect.orElseSucceed(() => null))
       if (pending === null) return
       yield* FiberSet.run(
         accepted,
-        Effect.tryPromise(async () => (await pending.accept()).connect()).pipe(Effect.flatMap(serve), Effect.ignore),
+        Effect.tryPromise(() => pending.accept()).pipe(Effect.flatMap(serve), Effect.ignore),
       )
     }
   }).pipe(Effect.forkScoped)
@@ -163,7 +156,7 @@ const make = Effect.fnUntraced(function* (options: Options) {
   const layerScope = yield* Scope.Scope
   const gateways = new Map<string, Gateway & { connection: Connection }>()
   const lock = yield* Semaphore.make(1)
-  yield* Effect.addFinalizer(() => Effect.sync(() => gateways.forEach((gateway) => gateway.connection.close(0n, []))))
+  yield* Effect.addFinalizer(() => Effect.sync(() => gateways.forEach((gateway) => gateway.connection.close())))
 
   const dial = Effect.fn("Peers.dial")(function* (id: string) {
     const instance = (yield* servers).find((peer) => peer.id === id)
@@ -171,12 +164,11 @@ const make = Effect.fnUntraced(function* (options: Options) {
     // iroh's TLS handshake proves the remote holds the dialed endpoint ID's key.
     const connection = yield* Effect.tryPromise({
       try: async () =>
-        endpoint.connect(
-          new EndpointAddr(EndpointId.fromString(id), instance.address?.relay ?? null, [
-            ...(instance.address?.addresses ?? []),
-          ]),
-          ALPN,
-        ),
+        endpoint.connect({
+          id,
+          relay: instance.address?.relay ?? null,
+          addresses: [...(instance.address?.addresses ?? [])],
+        }),
       catch: (cause) => new Unavailable({ message: `Could not reach peer ${instance.name}`, cause }),
     })
     const token = yield* Effect.gen(function* () {
@@ -185,10 +177,10 @@ const make = Effect.fnUntraced(function* (options: Options) {
       yield* Effect.tryPromise(() => control.send.finish())
       const reply = yield* Effect.tryPromise(() => control.recv.readToEnd(4096))
       if (reply.length === 0) return yield* Effect.fail("empty token")
-      return new TextDecoder().decode(Uint8Array.from(reply))
+      return new TextDecoder().decode(reply)
     }).pipe(
       Effect.mapError((cause) => new Unavailable({ message: `Peer ${instance.name} refused the connection`, cause })),
-      Effect.onError(() => Effect.sync(() => connection.close(0n, []))),
+      Effect.onError(() => Effect.sync(() => connection.close())),
     )
     return { connection, token }
   })
@@ -205,7 +197,7 @@ const make = Effect.fnUntraced(function* (options: Options) {
     const server = yield* NodeSocketServer.make({ host: "127.0.0.1", port: 0 }).pipe(
       Scope.provide(layerScope),
       Effect.mapError((cause) => new Unavailable({ message: "Failed to open a local peer listener", cause })),
-      Effect.onError(() => Effect.sync(() => dialed.connection.close(0n, []))),
+      Effect.onError(() => Effect.sync(() => dialed.connection.close())),
     )
     const port = NetAddress.isInetAddress(server.address) ? server.address.port : 0
     const gateway = { url: `http://127.0.0.1:${port}`, token: dialed.token, connection: dialed.connection }
@@ -254,10 +246,7 @@ const pipe = Effect.fn("Peers.pipe")(
     const pull = yield* Socket.readerBytes(socket)
     const upload = Effect.gen(function* () {
       while (true) {
-        for (const chunk of yield* pull) {
-          // The binding only accepts number[] buffers.
-          yield* Effect.tryPromise(() => stream.send.writeAll(Array.from(chunk)))
-        }
+        for (const chunk of yield* pull) yield* Effect.tryPromise(() => stream.send.writeAll(chunk))
       }
     }).pipe(Effect.catchIf(isEnd, () => Effect.tryPromise(() => stream.send.finish())))
     // Releasing the writer's scope half-closes the TCP socket once the peer finishes.
@@ -266,7 +255,7 @@ const pipe = Effect.fn("Peers.pipe")(
       while (true) {
         const bytes = yield* Effect.tryPromise(() => stream.recv.read(CHUNK))
         if (bytes.length === 0) return
-        yield* writer.write(Uint8Array.from(bytes))
+        yield* writer.write(bytes)
       }
     }).pipe(Effect.scoped)
     yield* Effect.all([upload, download], { concurrency: 2, discard: true })
@@ -276,8 +265,8 @@ const pipe = Effect.fn("Peers.pipe")(
     effect.pipe(
       Effect.onError(() =>
         Effect.promise(async () => {
-          await stream.send.reset(0n).catch(() => {})
-          await stream.recv.stop(0n).catch(() => {})
+          await stream.send.reset().catch(() => {})
+          await stream.recv.stop().catch(() => {})
         }),
       ),
     ),
