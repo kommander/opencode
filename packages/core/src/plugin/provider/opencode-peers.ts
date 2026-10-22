@@ -52,21 +52,20 @@ export const Plugin = define<HttpClient.HttpClient | Scope.Scope>({
         if (self && auth) yield* send(HttpClientRequest.delete(`${base}/v1/instances/${self.id}`), auth)
       }).pipe(Effect.timeout("3 seconds"), Effect.ignore),
     )
-    // Announce this server, then replace this plugin's peers with the account's other servers.
+    // The announce is this server's heartbeat and returns the account's instances, which replace this plugin's peers.
     yield* Effect.gen(function* () {
       const self = yield* ctx.peer.self()
       const auth = yield* headers
       const instances =
         !self || !auth
           ? []
-          : yield* Effect.gen(function* () {
-              yield* send(
-                HttpClientRequest.put(`${base}/v1/instances/${self.id}`).pipe(HttpClientRequest.bodyJsonUnsafe(self)),
-                auth,
-              )
-              const response = yield* send(HttpClientRequest.get(`${base}/v1/instances`), auth)
-              return (yield* HttpClientResponse.schemaBodyJson(Directory)(response)).instances
-            })
+          : yield* send(
+              HttpClientRequest.put(`${base}/v1/instances/${self.id}`).pipe(HttpClientRequest.bodyJsonUnsafe(self)),
+              auth,
+            ).pipe(
+              Effect.flatMap(HttpClientResponse.schemaBodyJson(Directory)),
+              Effect.map((directory) => directory.instances),
+            )
       const others = instances.filter((instance) => instance.id !== self?.id)
       yield* Effect.forEach(others, ctx.peer.add)
       const current = new Set(others.map((instance) => instance.id))
@@ -78,7 +77,7 @@ export const Plugin = define<HttpClient.HttpClient | Scope.Scope>({
       current.forEach((id) => listed.add(id))
     }).pipe(
       Effect.catch((error) => Effect.logWarning("peer directory sync failed", { error: String(error) })),
-      Effect.repeat(Schedule.spaced("15 seconds")),
+      Effect.repeat(Schedule.spaced("60 seconds")),
       Effect.forkScoped,
     )
   }),

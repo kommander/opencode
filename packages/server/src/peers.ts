@@ -36,8 +36,8 @@ export class Unavailable extends Schema.TaggedError<Unavailable>()("Peers.Unavai
 }) {}
 
 export interface Interface {
-  /** The peer list that server-wide plugins maintain, without this server. */
-  readonly list: () => Effect.Effect<ReadonlyArray<PeerEntry>, Unavailable>
+  /** Servers in the peer list, and whether this server holds a live connection to each. */
+  readonly list: () => Effect.Effect<ReadonlyArray<PeerEntry & { readonly connected: boolean }>, Unavailable>
   readonly connect: (id: string) => Effect.Effect<Gateway, Unavailable>
 }
 
@@ -224,7 +224,12 @@ const make = Effect.fnUntraced(function* (options: Options) {
   })
 
   return Service.of({
-    list: () => servers,
+    list: () =>
+      servers.pipe(
+        Effect.map((list) =>
+          list.map((peer) => ({ ...peer, connected: gateways.get(peer.id)?.connection.closeReason() === null })),
+        ),
+      ),
     connect: Effect.fn("Peers.connect")(
       function* (id) {
         const existing = gateways.get(id)

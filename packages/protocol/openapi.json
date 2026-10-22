@@ -17538,9 +17538,12 @@
                 "enum": ["Infinity", "-Infinity", "NaN"]
               }
             ]
+          },
+          "connected": {
+            "type": "boolean"
           }
         },
-        "required": ["id", "name", "updated"],
+        "required": ["id", "name", "updated", "connected"],
         "additionalProperties": false
       },
       "Permission.Effect": {

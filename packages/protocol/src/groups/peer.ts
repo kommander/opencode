@@ -8,6 +8,8 @@ export const PeerInfo = Schema.Struct({
   version: Schema.optional(Schema.String),
   /** When the peer last announced itself, in epoch milliseconds. */
   updated: Schema.Number,
+  /** Whether this server holds a live connection to the peer. */
+  connected: Schema.Boolean,
 }).annotate({ identifier: "PeerInfo" })
 export type PeerInfo = typeof PeerInfo.Type
 

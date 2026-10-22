@@ -44,7 +44,11 @@ const choose = Effect.fn("cli.connect.choose")(function* (input: Runtime.Input<t
       options: peers.map((peer) => ({
         value: peer.id,
         label: peer.name,
-        hint: [peer.id.slice(0, 8), peer.version, `seen ${Math.round((Date.now() - peer.updated) / 60_000)}m ago`]
+        hint: [
+          peer.id.slice(0, 8),
+          peer.version,
+          peer.connected ? "connected" : `seen ${Math.round((Date.now() - peer.updated) / 60_000)}m ago`,
+        ]
           .filter(Boolean)
           .join(" · "),
       })),
