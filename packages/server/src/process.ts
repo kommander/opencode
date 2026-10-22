@@ -18,6 +18,8 @@ import { authorizedRequest, unauthorizedResponse } from "./middleware/authorizat
 import { withoutParentSpan } from "./request-tracing"
 import { createRoutes } from "./routes"
 import { ServerInfo } from "./server-info"
+import { ServerPeers } from "./peers"
+import { ServerPlugins } from "./plugins"
 import { Status } from "./service-status"
 import type { ServerOptions } from "./options"
 
@@ -109,7 +111,24 @@ export const start = Effect.fn("ServerProcess.start")(function* <E, R>(
         Effect.provideService(Scope.Scope, applicationScope),
       )
     }
-    yield* Ref.set(application, Option.some(Context.get(context, HttpRouter.HttpRouter).asHttpEffect()))
+    const routes = Context.get(context, HttpRouter.HttpRouter).asHttpEffect()
+    const plugins = yield* ServerPlugins.start({
+      url: localURLs()[0],
+      headers: { authorization: `Basic ${btoa(`opencode:${password}`)}` },
+    }).pipe(Effect.provide(context), Effect.provideService(Scope.Scope, applicationScope))
+    const peers = yield* ServerPeers.make(plugins.peers).pipe(Effect.provide(context))
+    const pluginRoutes = ServerPlugins.serve(plugins.routes)
+    yield* Ref.set(
+      application,
+      Option.some(
+        Effect.flatMap(HttpServerRequest.HttpServerRequest, (request) => {
+          const pathname = new URL(request.url, "http://localhost").pathname
+          if (ServerPeers.matches(pathname)) return peers
+          if (ServerPlugins.matches(pathname)) return pluginRoutes
+          return routes
+        }),
+      ),
+    )
     yield* status.ready
     const bus = Context.get(context, Bus.Service)
     return {
