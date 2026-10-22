@@ -181,7 +181,12 @@ function makeRoutes<AuthError, AuthServices>(
       )
       const peers =
         options.peers && peerTarget
-          ? Peers.layer({ url: options.peers.url, target: peerTarget, version: options.app?.version })
+          ? Peers.layer({
+              url: options.peers.url,
+              name: options.peers.name,
+              target: peerTarget,
+              version: options.app?.version,
+            })
           : Peers.disabled
       const api = HttpApiBuilder.layer(Api, { openapiPath: "/openapi.json" }).pipe(
         Layer.provide(

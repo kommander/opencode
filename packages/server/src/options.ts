@@ -48,6 +48,7 @@ export const ServerOptions = Schema.Struct({
   peers: Schema.optional(
     Schema.Struct({
       url: Schema.String,
+      name: Schema.optional(Schema.String),
     }),
   ),
 })

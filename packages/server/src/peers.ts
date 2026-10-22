@@ -35,6 +35,8 @@ export interface Gateway {
 
 export interface Options {
   readonly url: string
+  /** Name shown to the account's other servers; defaults to the hostname. */
+  readonly name?: string
   readonly target: { readonly hostname: string; readonly port: number }
   readonly version?: string
 }
@@ -181,7 +183,7 @@ const make = Effect.fnUntraced(function* (options: Options) {
     yield* send(
       HttpClientRequest.put(`${base}/v1/instances/${self}`).pipe(
         HttpClientRequest.bodyJsonUnsafe({
-          name: hostname(),
+          name: options.name || hostname(),
           version: options.version,
           address: { relay: current.relayUrl(), addresses: [...new Set([...current.directAddresses(), ...bound])] },
         }),
