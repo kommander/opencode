@@ -169,6 +169,9 @@ import type {
   CredentialActivateOutput,
   CredentialRemoveInput,
   CredentialRemoveOutput,
+  PeerListOutput,
+  PeerConnectInput,
+  PeerConnectOutput,
   ProjectListInput,
   ProjectListOutput,
   ProjectUpdateInput,
@@ -1148,6 +1151,24 @@ const adaptGroupCredential = (raw: RawClient["server.credential"]) => ({
   remove: EndpointCredentialRemove(raw),
 })
 
+const EndpointPeerList = (raw: RawClient["server.peer"]) => () =>
+  preserveEffect<PeerListOutput>()(
+    raw["peer.list"]({}).pipe(
+      Effect.mapError(mapClientError),
+      Effect.map((value) => value.data),
+    ),
+  )
+
+const EndpointPeerConnect = (raw: RawClient["server.peer"]) => (input: PeerConnectInput) =>
+  preserveEffect<PeerConnectOutput>()(
+    raw["peer.connect"]({ params: { id: input["id"] } }).pipe(Effect.mapError(mapClientError)),
+  )
+
+const adaptGroupPeer = (raw: RawClient["server.peer"]) => ({
+  list: EndpointPeerList(raw),
+  connect: EndpointPeerConnect(raw),
+})
+
 const EndpointProjectList = (raw: RawClient["server.project"]) => (input?: ProjectListInput) =>
   preserveEffect<ProjectListOutput>()(
     raw["project.list"]({ query: { archived: input?.["archived"] } }).pipe(Effect.mapError(mapClientError)),
@@ -1681,6 +1702,7 @@ const adaptClient = (raw: RawClient) => ({
   integration: adaptGroupIntegration(raw["server.integration"]),
   mcp: adaptGroupMcp(raw["server.mcp"]),
   credential: adaptGroupCredential(raw["server.credential"]),
+  peer: adaptGroupPeer(raw["server.peer"]),
   project: adaptGroupProject(raw["server.project"]),
   form: adaptGroupForm(raw["server.form"]),
   permission: adaptGroupPermission(raw["server.permission"]),

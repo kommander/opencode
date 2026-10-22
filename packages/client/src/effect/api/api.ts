@@ -1719,6 +1719,23 @@ export interface CredentialApi<E = never> {
   readonly remove: CredentialRemoveOperation<E>
 }
 
+export type PeerListOutput = ReadonlyArray<{
+  readonly id: string
+  readonly name: string
+  readonly version?: string | undefined
+  readonly online: boolean
+}>
+export type PeerListOperation<E = never> = () => Effect.Effect<PeerListOutput, E>
+
+export type PeerConnectInput = { readonly id: string }
+export type PeerConnectOutput = { readonly url: string; readonly token: string }
+export type PeerConnectOperation<E = never> = (input: PeerConnectInput) => Effect.Effect<PeerConnectOutput, E>
+
+export interface PeerApi<E = never> {
+  readonly list: PeerListOperation<E>
+  readonly connect: PeerConnectOperation<E>
+}
+
 export type ProjectListInput = { readonly archived?: boolean | undefined }
 export type ProjectListOutput = ReadonlyArray<Project.Info>
 export type ProjectListOperation<E = never> = (input?: ProjectListInput) => Effect.Effect<ProjectListOutput, E>
@@ -2347,6 +2364,7 @@ export interface AppApi<E = never> {
   readonly integration: IntegrationApi<E>
   readonly mcp: McpApi<E>
   readonly credential: CredentialApi<E>
+  readonly peer: PeerApi<E>
   readonly project: ProjectApi<E>
   readonly form: FormApi<E>
   readonly permission: PermissionApi<E>

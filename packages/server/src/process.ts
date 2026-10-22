@@ -101,6 +101,8 @@ export const start = Effect.fn("ServerProcess.start")(function* <E, R>(
           password,
         },
         urls,
+        [],
+        loopbackTarget(bound.http.address),
       ).pipe(Layer.provideMerge(NodeHttpServer.layerHttpServices)),
       applicationScope,
     )
@@ -162,6 +164,15 @@ function bind(hostname: string, port: number) {
       Effect.onError((cause) => Scope.close(serverScope, Exit.failCause(cause))),
     )
   })
+}
+
+// A wildcard bind also listens on loopback, which is all local forwarding needs.
+function loopbackTarget(address: NetAddress.SocketAddress) {
+  if (!NetAddress.isInetAddress(address)) return
+  const hostname = NetAddress.formatIp(address.address)
+  if (hostname === "0.0.0.0") return { hostname: "127.0.0.1", port: address.port }
+  if (hostname === "::") return { hostname: "::1", port: address.port }
+  return { hostname, port: address.port }
 }
 
 function addressInUse(error: unknown) {

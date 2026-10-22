@@ -42,6 +42,7 @@ import { handlers } from "./handlers"
 import { authorizationLayer } from "./middleware/authorization"
 import { schemaErrorLayer } from "./middleware/schema-error"
 import { ServerPairing } from "./pairing"
+import { Peers } from "./peers"
 import { layer } from "./location"
 import { formLocationLayer } from "./middleware/form-location"
 import { sessionLocationLayer } from "./middleware/session-location"
@@ -80,6 +81,8 @@ export function createRoutes(
   options: ServerOptions = {},
   serviceURLs: () => ReadonlyArray<string> = () => [],
   overrides: LayerNode.Replacements = [],
+  // Loopback address of the listening server; peer connections need it to forward inbound streams.
+  peerTarget?: Peers.Options["target"],
 ) {
   return makeRoutes(
     options.password
@@ -88,6 +91,8 @@ export function createRoutes(
     options,
     serviceURLs,
     overrides,
+    undefined,
+    peerTarget,
   )
 }
 
@@ -110,6 +115,7 @@ function makeRoutes<AuthError, AuthServices>(
   // Runtime-profile replacements (e.g. workerd) applied after the standard set, so later entries win.
   overrides: LayerNode.Replacements,
   instances?: InstanceNode,
+  peerTarget?: Peers.Options["target"],
 ) {
   const standard: LayerNode.Replacements = [
     Database.node.replace(Database.configured(options.database)),
@@ -173,8 +179,18 @@ function makeRoutes<AuthError, AuthServices>(
         ),
         ServerInfo.layer(serviceURLs, Context.get(context, Global.Service).tmp, options.app),
       )
+      const peers =
+        options.peers && peerTarget
+          ? Peers.layer({ url: options.peers.url, target: peerTarget, version: options.app?.version })
+          : Peers.disabled
       const api = HttpApiBuilder.layer(Api, { openapiPath: "/openapi.json" }).pipe(
-        Layer.provide(handlers.pipe(Layer.provide(services), Layer.provide(Layer.succeed(CorsConfig, options)))),
+        Layer.provide(
+          handlers.pipe(
+            Layer.provide(peers),
+            Layer.provide(services),
+            Layer.provide(Layer.succeed(CorsConfig, options)),
+          ),
+        ),
         Layer.provide(formLocationLayer),
         Layer.provide(sessionLocationLayer),
         Layer.provide(layer),

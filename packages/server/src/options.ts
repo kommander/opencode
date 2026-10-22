@@ -44,5 +44,11 @@ export const ServerOptions = Schema.Struct({
       fff: Schema.optional(Schema.Boolean),
     }),
   ),
+  // Peer directory for iroh peer connections. Only a listening ServerProcess enables them.
+  peers: Schema.optional(
+    Schema.Struct({
+      url: Schema.String,
+    }),
+  ),
 })
 export type ServerOptions = typeof ServerOptions.Type

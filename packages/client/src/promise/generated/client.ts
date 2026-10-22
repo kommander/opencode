@@ -163,6 +163,9 @@ import type {
   CredentialActivateOutput,
   CredentialRemoveInput,
   CredentialRemoveOutput,
+  PeerListOutput,
+  PeerConnectInput,
+  PeerConnectOutput,
   ProjectListInput,
   ProjectListOutput,
   ProjectUpdateInput,
@@ -1519,6 +1522,24 @@ export function make(options: ClientOptions) {
             successStatus: 204,
             declaredStatuses: [400, 401],
             empty: true,
+          },
+          requestOptions,
+        ),
+    },
+    peer: {
+      list: (requestOptions?: RequestOptions) =>
+        request<{ readonly data: PeerListOutput }>(
+          { method: "GET", path: `/api/peers`, successStatus: 200, declaredStatuses: [400, 401, 503], empty: false },
+          requestOptions,
+        ).then((value) => value.data),
+      connect: (input: PeerConnectInput, requestOptions?: RequestOptions) =>
+        request<PeerConnectOutput>(
+          {
+            method: "POST",
+            path: `/api/peers/${encodeURIComponent(input.id)}/connect`,
+            successStatus: 200,
+            declaredStatuses: [400, 401, 404, 503],
+            empty: false,
           },
           requestOptions,
         ),

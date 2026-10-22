@@ -141,6 +141,7 @@ const processEffect = Effect.fnUntraced(function* (options: Options) {
                 ? process.platform !== "win32"
                 : !truthy(process.env.OPENCODE_DISABLE_FFF),
           },
+          peers: process.env.OPENCODE_PEERS_URL ? { url: process.env.OPENCODE_PEERS_URL } : undefined,
         },
         serviceOptions === undefined
           ? undefined

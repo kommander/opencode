@@ -246,6 +246,10 @@ export type McpResourceTemplate = {
 
 export type CredentialKey = { type: "key"; key: string; metadata?: { [x: string]: JsonValue } }
 
+export type PeerInfo = { id: string; name: string; version?: string | undefined; online: boolean }
+
+export type PeerConnection = { url: string; token: string }
+
 export type ProjectVcs = string
 
 export type ProjectIcon = { url?: string; override?: string; color?: string }
@@ -2858,6 +2862,10 @@ export type McpServerNotFoundError = {
 export const isMcpServerNotFoundError = (value: unknown): value is McpServerNotFoundError =>
   typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "McpServerNotFoundError"
 
+export type PeerNotFoundError = { readonly _tag: "PeerNotFoundError"; readonly id: string; readonly message: string }
+export const isPeerNotFoundError = (value: unknown): value is PeerNotFoundError =>
+  typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "PeerNotFoundError"
+
 export type ProjectNotFoundError = {
   readonly _tag: "ProjectNotFoundError"
   readonly projectID: string
@@ -5361,6 +5369,12 @@ export type CredentialActivateOutput = void
 export type CredentialRemoveInput = { readonly credentialID: { readonly credentialID: string }["credentialID"] }
 
 export type CredentialRemoveOutput = void
+
+export type PeerListOutput = { data: Array<PeerInfo> }["data"]
+
+export type PeerConnectInput = { readonly id: { readonly id: string }["id"] }
+
+export type PeerConnectOutput = PeerConnection
 
 export type ProjectListInput = { readonly archived?: { readonly archived?: boolean | undefined }["archived"] }
 
