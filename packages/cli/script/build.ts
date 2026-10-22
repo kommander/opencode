@@ -150,6 +150,27 @@ export default { path: file, version: ${JSON.stringify(opencodePty.version)}, sh
     },
   }
   const target = targetName(item)
+  const irohPackage = `@number0/iroh-${item.os}-${item.arch}${item.os === "linux" ? `-${item.abi ?? "gnu"}` : item.os === "win32" ? "-msvc" : ""}`
+  // The napi-rs loader requires every platform package it can resolve, so Bun would embed all of them.
+  // Keep its generated `module.exports.X = nativeBinding.X` footer so Bun still sees the named exports.
+  const irohPlugin: BunPlugin = {
+    name: "iroh-binding",
+    setup(build) {
+      build.onLoad({ filter: /@number0[/\\]iroh[/\\]index\.js$/ }, async (args) => {
+        const source = await Bun.file(args.path).text()
+        const exports = source.indexOf("module.exports = nativeBinding")
+        if (exports === -1) throw new Error(`Unexpected iroh loader: ${args.path}`)
+        const supported = (await Bun.file(path.join(path.dirname(args.path), "package.json")).json())
+          .optionalDependencies[irohPackage]
+        return {
+          contents: supported
+            ? `const nativeBinding = require(${JSON.stringify(irohPackage)})\n${source.slice(exports)}`
+            : `throw new Error("iroh has no native binding for ${target}")`,
+          loader: "js",
+        }
+      })
+    },
+  }
   const name = target.replace(binary, "cli")
   const executablePath = await compileExecutable(item)
   console.log(`building ${name}`)
@@ -160,6 +181,7 @@ export default { path: file, version: ${JSON.stringify(opencodePty.version)}, sh
       appAssetsPlugin,
       solidPlugin,
       parcelWatcherPlugin,
+      irohPlugin,
       opencodePtyPlugin,
       pluginRuntimePlugin,
       simulationGraphPlugin,
