@@ -1723,7 +1723,6 @@ export type PeerListOutput = ReadonlyArray<{
   readonly id: string
   readonly name: string
   readonly version?: string | undefined
-  readonly online: boolean
   readonly updated: number
 }>
 export type PeerListOperation<E = never> = () => Effect.Effect<PeerListOutput, E>

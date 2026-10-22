@@ -2,6 +2,7 @@ export * as Peers from "./peers"
 
 import type { BiStream, Connection } from "@number0/iroh/index.js"
 import { Peer } from "@opencode/core/peer"
+import type { PeerEntry } from "@opencode/plugin/effect/global"
 import { Global } from "@opencode/util/global"
 import { Context, Effect, FiberSet, Layer, Schema, Scope, Semaphore } from "effect"
 import { NetAddress } from "effect/net"
@@ -15,18 +16,9 @@ import { ServerAuth } from "./auth"
 const ALPN = Array.from(new TextEncoder().encode("opencode/peer/1"))
 const HELLO = Array.from(new TextEncoder().encode("opencode/peer/1 hello"))
 const CHUNK = 64 * 1024
-const ONLINE_WINDOW_MS = 2 * 60 * 1000
-
-export interface Peer {
-  readonly id: string
-  readonly name: string
-  readonly version?: string
-  readonly online: boolean
-  readonly updated: number
-}
 
 /** A loopback URL that reaches the peer, and the token its server accepts as the Basic password for user "opencode". */
-export interface Gateway {
+interface Gateway {
   readonly url: string
   readonly token: string
 }
@@ -43,22 +35,13 @@ export class Unavailable extends Schema.TaggedError<Unavailable>()("Peers.Unavai
   cause: Schema.optional(Schema.Defect()),
 }) {}
 
-export class NotFound extends Schema.TaggedError<NotFound>()("Peers.NotFound", { id: Schema.String }) {
-  override get message() {
-    return `Peer not found: ${this.id}`
-  }
-}
-
 export interface Interface {
-  /** Peers that server-wide plugins added to the peer list. */
-  readonly list: () => Effect.Effect<ReadonlyArray<Peer>, Unavailable>
-  /** Returns a loopback URL and Basic credentials that reach the peer's server. */
-  readonly connect: (id: string) => Effect.Effect<Gateway, Unavailable | NotFound>
+  /** The peer list that server-wide plugins maintain, without this server. */
+  readonly list: () => Effect.Effect<ReadonlyArray<PeerEntry>, Unavailable>
+  readonly connect: (id: string) => Effect.Effect<Gateway, Unavailable>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/Peers") {}
-
-const Hello = Schema.fromJsonString(Schema.Struct({ token: Schema.String }))
 
 const unavailable = (message: string) =>
   Service.of({
@@ -121,7 +104,7 @@ const make = Effect.fnUntraced(function* (options: Options) {
   )
   const self = endpoint.id().toString()
 
-  yield* registry.provideSelf(
+  yield* registry.setSelf(
     Effect.gen(function* () {
       // Waits for a home relay on first use only; direct addresses are still announced without one.
       yield* Effect.promise(() => endpoint.online()).pipe(Effect.timeout("10 seconds"), Effect.ignore)
@@ -149,9 +132,7 @@ const make = Effect.fnUntraced(function* (options: Options) {
       if (token === undefined) return
       const control = yield* Effect.tryPromise(() => connection.acceptBi())
       yield* Effect.tryPromise(() => control.recv.readToEnd(256))
-      yield* Effect.tryPromise(() =>
-        control.send.writeAll(Array.from(new TextEncoder().encode(JSON.stringify({ token })))),
-      )
+      yield* Effect.tryPromise(() => control.send.writeAll(Array.from(new TextEncoder().encode(token))))
       yield* Effect.tryPromise(() => control.send.finish())
       while (true) {
         const stream = yield* Effect.tryPromise(() => connection.acceptBi())
@@ -183,7 +164,7 @@ const make = Effect.fnUntraced(function* (options: Options) {
 
   const dial = Effect.fn("Peers.dial")(function* (id: string) {
     const instance = (yield* peers).find((peer) => peer.id === id)
-    if (!instance) return yield* new NotFound({ id })
+    if (!instance) return yield* new Unavailable({ message: `Peer not found: ${id}` })
     const connection = yield* Effect.tryPromise({
       try: async () =>
         endpoint.connect(
@@ -201,7 +182,8 @@ const make = Effect.fnUntraced(function* (options: Options) {
       yield* Effect.tryPromise(() => control.send.writeAll(HELLO))
       yield* Effect.tryPromise(() => control.send.finish())
       const reply = yield* Effect.tryPromise(() => control.recv.readToEnd(4096))
-      return (yield* Schema.decodeUnknownEffect(Hello)(new TextDecoder().decode(Uint8Array.from(reply)))).token
+      if (reply.length === 0) return yield* Effect.fail("empty token")
+      return new TextDecoder().decode(Uint8Array.from(reply))
     }).pipe(
       Effect.mapError((cause) => new Unavailable({ message: `Peer ${instance.name} refused the connection`, cause })),
       Effect.onError(() => Effect.sync(() => connection.close(0n, []))),
@@ -240,16 +222,7 @@ const make = Effect.fnUntraced(function* (options: Options) {
   })
 
   return Service.of({
-    list: Effect.fn("Peers.list")(function* () {
-      const now = Date.now()
-      return (yield* peers).map((instance) => ({
-        id: instance.id,
-        name: instance.name,
-        version: instance.version,
-        online: now - instance.updated < ONLINE_WINDOW_MS,
-        updated: instance.updated,
-      }))
-    }),
+    list: () => peers,
     connect: Effect.fn("Peers.connect")(
       function* (id) {
         const existing = gateways.get(id)

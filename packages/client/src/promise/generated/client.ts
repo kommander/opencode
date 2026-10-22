@@ -1538,7 +1538,7 @@ export function make(options: ClientOptions) {
             method: "POST",
             path: `/api/peers/${encodeURIComponent(input.id)}/connect`,
             successStatus: 200,
-            declaredStatuses: [400, 401, 404, 503],
+            declaredStatuses: [400, 401, 503],
             empty: false,
           },
           requestOptions,

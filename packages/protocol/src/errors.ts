@@ -274,12 +274,3 @@ export class ShellNotFoundError extends Schema.TaggedError<ShellNotFoundError>()
   },
   { httpApiStatus: 404 },
 ) {}
-
-export class PeerNotFoundError extends Schema.TaggedError<PeerNotFoundError>()(
-  "PeerNotFoundError",
-  {
-    id: Schema.String,
-    message: Schema.String,
-  },
-  { httpApiStatus: 404 },
-) {}

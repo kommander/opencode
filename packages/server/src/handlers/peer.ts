@@ -1,4 +1,4 @@
-import { PeerNotFoundError, ServiceUnavailableError } from "@opencode/protocol/errors"
+import { ServiceUnavailableError } from "@opencode/protocol/errors"
 import { Effect } from "effect"
 import { HttpApiBuilder } from "effect/http-api"
 import { Api } from "../api"
@@ -18,13 +18,7 @@ export const PeerHandler = HttpApiBuilder.group(Api, "server.peer", (handlers) =
       .handle("peer.connect", (ctx) =>
         peers
           .connect(ctx.params.id)
-          .pipe(
-            Effect.mapError((error) =>
-              error._tag === "Peers.NotFound"
-                ? new PeerNotFoundError({ id: error.id, message: error.message })
-                : new ServiceUnavailableError({ message: error.message, service: "peers" }),
-            ),
-          ),
+          .pipe(Effect.mapError((error) => new ServiceUnavailableError({ message: error.message, service: "peers" }))),
       )
   }),
 )

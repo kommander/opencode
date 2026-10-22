@@ -16,11 +16,8 @@ import { OpenCode } from "@opencode/client/promise"
 import { findSession } from "../../session-target"
 import { errorMessage } from "../../util/error"
 
-export default Runtime.handler(Commands, (input) => tui(input))
-
-/** Starts the TUI; `password` overrides OPENCODE_PASSWORD for an explicit `--server`, as `opencode connect` does. */
-export function tui(input: Runtime.Input<typeof Commands>, password?: string) {
-  return Effect.gen(function* () {
+export default Runtime.handler(Commands, (input) =>
+  Effect.gen(function* () {
     const requestedDirectory = Option.getOrUndefined(input.directory)
     const requestedServer = Option.getOrUndefined(input.server)
     if (requestedDirectory !== undefined) process.chdir(requestedDirectory)
@@ -37,7 +34,6 @@ export function tui(input: Runtime.Input<typeof Commands>, password?: string) {
     )
     const server = yield* ServerConnection.resolve({
       server: requestedServer,
-      password,
       standalone: input.standalone,
       mismatch: "replace",
       onStart: (reason, previousVersion) => {
@@ -60,10 +56,7 @@ export function tui(input: Runtime.Input<typeof Commands>, password?: string) {
       session !== undefined &&
       (yield* Effect.tryPromise({
         try: () =>
-          findSession(
-            OpenCode.make({ baseUrl: server.endpoint.url, headers: Service.headers(server.endpoint) }),
-            session,
-          ),
+          findSession(OpenCode.make({ baseUrl: server.endpoint.url, headers: Service.headers(server.endpoint) }), session),
         catch: (cause) => new Error(errorMessage(cause)),
       })) !== undefined
     const updater = yield* Updater.Service
@@ -161,5 +154,5 @@ export function tui(input: Runtime.Input<typeof Commands>, password?: string) {
         runFork(effect)
       },
     }).pipe(Effect.provide(LayerNode.compile(Global.node)))
-  })
-}
+  }),
+)

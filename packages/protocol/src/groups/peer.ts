@@ -1,12 +1,11 @@
 import { Schema } from "effect"
 import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/http-api"
-import { PeerNotFoundError, ServiceUnavailableError } from "../errors.js"
+import { ServiceUnavailableError } from "../errors.js"
 
 export const PeerInfo = Schema.Struct({
   id: Schema.String,
   name: Schema.String,
   version: Schema.optional(Schema.String),
-  online: Schema.Boolean,
   /** When the peer last announced itself, in epoch milliseconds. */
   updated: Schema.Number,
 }).annotate({ identifier: "PeerInfo" })
@@ -27,7 +26,7 @@ export const PeerGroup = HttpApiGroup.make("server.peer")
       OpenApi.annotations({
         identifier: "peer.list",
         summary: "List peers",
-        description: "List the signed-in account's other OpenCode servers known to the peer directory.",
+        description: "List the other OpenCode servers this server can connect to.",
       }),
     ),
   )
@@ -35,7 +34,7 @@ export const PeerGroup = HttpApiGroup.make("server.peer")
     HttpApiEndpoint.post("peer.connect", "/api/peers/:id/connect", {
       params: { id: Schema.String },
       success: PeerConnection,
-      error: [PeerNotFoundError, ServiceUnavailableError],
+      error: ServiceUnavailableError,
     }).annotateMerge(
       OpenApi.annotations({
         identifier: "peer.connect",

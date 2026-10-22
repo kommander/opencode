@@ -246,7 +246,7 @@ export type McpResourceTemplate = {
 
 export type CredentialKey = { type: "key"; key: string; metadata?: { [x: string]: JsonValue } }
 
-export type PeerInfo = { id: string; name: string; version?: string | undefined; online: boolean; updated: number }
+export type PeerInfo = { id: string; name: string; version?: string | undefined; updated: number }
 
 export type PeerConnection = { url: string; token: string }
 
@@ -2861,10 +2861,6 @@ export type McpServerNotFoundError = {
 }
 export const isMcpServerNotFoundError = (value: unknown): value is McpServerNotFoundError =>
   typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "McpServerNotFoundError"
-
-export type PeerNotFoundError = { readonly _tag: "PeerNotFoundError"; readonly id: string; readonly message: string }
-export const isPeerNotFoundError = (value: unknown): value is PeerNotFoundError =>
-  typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "PeerNotFoundError"
 
 export type ProjectNotFoundError = {
   readonly _tag: "ProjectNotFoundError"

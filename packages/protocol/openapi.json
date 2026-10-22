@@ -8105,7 +8105,7 @@
             }
           }
         },
-        "description": "List the signed-in account's other OpenCode servers known to the peer directory.",
+        "description": "List the other OpenCode servers this server can connect to.",
         "summary": "List peers"
       }
     },
@@ -8151,16 +8151,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/UnauthorizedErrorEncoded"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "PeerNotFoundError",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PeerNotFoundErrorEncoded"
                 }
               }
             }
@@ -17538,9 +17528,6 @@
               }
             ]
           },
-          "online": {
-            "type": "boolean"
-          },
           "updated": {
             "anyOf": [
               {
@@ -17553,24 +17540,7 @@
             ]
           }
         },
-        "required": ["id", "name", "online", "updated"],
-        "additionalProperties": false
-      },
-      "PeerNotFoundErrorEncoded": {
-        "type": "object",
-        "properties": {
-          "_tag": {
-            "type": "string",
-            "enum": ["PeerNotFoundError"]
-          },
-          "id": {
-            "type": "string"
-          },
-          "message": {
-            "type": "string"
-          }
-        },
-        "required": ["_tag", "id", "message"],
+        "required": ["id", "name", "updated"],
         "additionalProperties": false
       },
       "Permission.Effect": {

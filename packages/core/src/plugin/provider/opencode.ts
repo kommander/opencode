@@ -338,10 +338,7 @@ export const OpencodePlugin = define<
         models: offer.models,
         workspace: offer.workspace,
         session: (input) =>
-          send("/live/sessions", {
-            session: { ...input.session, model: input.model },
-            transport: input.transport,
-          }).pipe(
+          send("/live/sessions", { session: { ...input.session, model: input.model }, transport: input.transport }).pipe(
             Effect.flatMap((text) =>
               Schema.decodeUnknownEffect(LiveSession)(text).pipe(
                 Effect.mapError(
