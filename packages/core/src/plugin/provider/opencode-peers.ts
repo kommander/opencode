@@ -11,7 +11,10 @@ const Directory = Schema.Struct({
       id: Schema.String,
       name: Schema.String,
       version: Schema.optional(Schema.String),
-      address: Schema.Struct({ relay: Schema.NullOr(Schema.String), addresses: Schema.Array(Schema.String) }),
+      kind: Schema.Literals(["server", "client"]),
+      address: Schema.optional(
+        Schema.Struct({ relay: Schema.NullOr(Schema.String), addresses: Schema.Array(Schema.String) }),
+      ),
       updated: Schema.Number,
     }),
   ),

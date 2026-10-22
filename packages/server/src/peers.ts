@@ -115,6 +115,7 @@ const make = Effect.fnUntraced(function* (options: Options) {
         .map((item) => item.replace(/^0\.0\.0\.0:/, "127.0.0.1:").replace(/^\[::\]:/, "[::1]:"))
       return {
         id: self,
+        kind: "server" as const,
         name: options.name || hostname(),
         version: options.version,
         address: { relay: current.relayUrl(), addresses: [...new Set([...current.directAddresses(), ...bound])] },
@@ -122,6 +123,8 @@ const make = Effect.fnUntraced(function* (options: Options) {
     }),
   )
   const peers = registry.list().pipe(Effect.map((list) => list.filter((peer) => peer.id !== self)))
+  // Only servers can be dialed; clients connect in.
+  const servers = peers.pipe(Effect.map((list) => list.filter((peer) => peer.kind === "server")))
 
   // Inbound: only servers in the peer list get a session token and a pipe to this server.
   const serve = Effect.fn("Peers.serve")(
@@ -163,13 +166,15 @@ const make = Effect.fnUntraced(function* (options: Options) {
   yield* Effect.addFinalizer(() => Effect.sync(() => gateways.forEach((gateway) => gateway.connection.close(0n, []))))
 
   const dial = Effect.fn("Peers.dial")(function* (id: string) {
-    const instance = (yield* peers).find((peer) => peer.id === id)
+    const instance = (yield* servers).find((peer) => peer.id === id)
     if (!instance) return yield* new Unavailable({ message: `Peer not found: ${id}` })
     // iroh's TLS handshake proves the remote holds the dialed endpoint ID's key.
     const connection = yield* Effect.tryPromise({
       try: async () =>
         endpoint.connect(
-          new EndpointAddr(EndpointId.fromString(id), instance.address.relay, [...instance.address.addresses]),
+          new EndpointAddr(EndpointId.fromString(id), instance.address?.relay ?? null, [
+            ...(instance.address?.addresses ?? []),
+          ]),
           ALPN,
         ),
       catch: (cause) => new Unavailable({ message: `Could not reach peer ${instance.name}`, cause }),
@@ -219,7 +224,7 @@ const make = Effect.fnUntraced(function* (options: Options) {
   })
 
   return Service.of({
-    list: () => peers,
+    list: () => servers,
     connect: Effect.fn("Peers.connect")(
       function* (id) {
         const existing = gateways.get(id)

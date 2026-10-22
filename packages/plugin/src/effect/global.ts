@@ -1,12 +1,14 @@
 import type { Credential } from "@opencode/schema/credential"
 import type { Effect, Scope } from "effect"
 
-/** A server this server may connect to, and accept connections from, over iroh. */
+/** A server this server may connect to and accept connections from, or a client it accepts connections from. */
 export interface PeerEntry {
   readonly id: string
   readonly name: string
   readonly version?: string
-  readonly address: { readonly relay: string | null; readonly addresses: ReadonlyArray<string> }
+  readonly kind: "server" | "client"
+  /** Where to dial a server; clients have none. */
+  readonly address?: { readonly relay: string | null; readonly addresses: ReadonlyArray<string> }
   /** When the peer last announced itself, in epoch milliseconds. */
   readonly updated: number
 }
