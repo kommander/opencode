@@ -7,8 +7,8 @@ import { createClient, request } from "./auth/shared"
 import tui from "./default"
 
 export default Runtime.handler(
-  Commands.commands.connect,
-  Effect.fn("cli.connect")(function* (input) {
+  Commands.commands.peer,
+  Effect.fn("cli.peer")(function* (input) {
     const gateway = yield* choose(input).pipe(handlePromptErrors)
     if (!gateway) return
     yield* tui({
@@ -32,8 +32,8 @@ export default Runtime.handler(
   }),
 )
 
-const choose = Effect.fn("cli.connect.choose")(function* (input: Runtime.Input<typeof Commands.commands.connect>) {
-  yield* requireInteractive("opencode connect needs an interactive terminal")
+const choose = Effect.fn("cli.peer.choose")(function* (input: Runtime.Input<typeof Commands.commands.peer>) {
+  yield* requireInteractive("opencode peer needs an interactive terminal")
   intro("Connect to another OpenCode server")
   const client = yield* createClient({ server: Option.getOrUndefined(input.server), standalone: input.standalone })
   const peers = yield* request((signal) => client.peer.list({ signal }))

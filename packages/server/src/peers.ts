@@ -112,7 +112,8 @@ const make = Effect.fnUntraced(function* (options: Options) {
         id: self,
         kind: "server" as const,
         name: options.name || hostname(),
-        version: options.version,
+        // Runs from source report the placeholder version "local", which reads like "this machine" in peer lists.
+        version: options.version === "local" ? "dev" : options.version,
         address: { relay: current.relay, addresses: [...new Set([...current.addresses, ...bound])] },
       }
     }),

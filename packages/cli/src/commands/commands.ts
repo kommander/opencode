@@ -516,7 +516,7 @@ const Root = Spec.make(typeof OPENCODE_CLI_NAME === "string" ? OPENCODE_CLI_NAME
         ...ServerParams,
       },
     }),
-    Spec.make("connect", {
+    Spec.make("peer", {
       description: "Pick another of your OpenCode servers and open the TUI on it (requires an OpenCode Console login)",
       params: ServerParams,
     }),
