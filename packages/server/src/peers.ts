@@ -115,13 +115,10 @@ const make = Effect.fnUntraced(function* (options: Options, relay: PeerRelay) {
   )
   const self = endpoint.id()
 
-  // Waits for a home relay on first use only; direct addresses are still announced without one.
-  const firstOnline = yield* Effect.cached(
-    Effect.promise(() => endpoint.online()).pipe(Effect.timeout("10 seconds"), Effect.ignore),
-  )
+  // Announced without waiting for a home relay: the relays admit this endpoint only with a token, which plugins
+  // issue only for an existing directory entry.
   yield* registry.setSelf(
-    Effect.gen(function* () {
-      yield* firstOnline
+    Effect.sync(() => {
       const current = endpoint.addr()
       // Wildcard sockets are not dialable; loopback forms make same-host peers work immediately.
       const bound = endpoint
@@ -150,6 +147,8 @@ const make = Effect.fnUntraced(function* (options: Options, relay: PeerRelay) {
     Effect.forever,
     Effect.forkScoped,
   )
+  // Announce the relay URL as soon as the first token brings the endpoint online, not at the next plugin heartbeat.
+  yield* Effect.promise(() => endpoint.online()).pipe(Effect.andThen(registry.refresh()), Effect.forkScoped)
   const peers = registry.list().pipe(Effect.map((list) => list.filter((peer) => peer.id !== self)))
   // Only servers can be dialed; clients connect in.
   const servers = peers.pipe(Effect.map((list) => list.filter((peer) => peer.kind === "server")))
