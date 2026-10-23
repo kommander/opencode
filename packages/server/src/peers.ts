@@ -4,7 +4,19 @@ import type { BiStream, Connection } from "@opencode-ai/iroh"
 import { Peer } from "@opencode/core/peer"
 import type { PeerEntry, PeerRelay } from "@opencode/plugin/effect/global"
 import { Global } from "@opencode/util/global"
-import { Context, Deferred, Duration, Effect, FiberSet, Layer, Option, Schema, Scope, Semaphore } from "effect"
+import {
+  Context,
+  Deferred,
+  Duration,
+  Effect,
+  FiberSet,
+  Layer,
+  Option,
+  Schedule,
+  Schema,
+  Scope,
+  Semaphore,
+} from "effect"
 import { NetAddress } from "effect/net"
 import { Socket } from "effect/socket"
 import { randomBytes } from "node:crypto"
@@ -22,6 +34,12 @@ const BLOCK_MS = 60 * 60 * 1000
 interface Gateway {
   readonly url: string
   readonly token: string
+}
+
+/** A gateway with its current iroh connection, and the error of its latest failed re-dial. */
+interface Dialed extends Gateway {
+  connection: Connection
+  failure?: Unavailable
 }
 
 export interface Options {
@@ -136,13 +154,13 @@ const make = Effect.fnUntraced(function* (options: Options, relay: PeerRelay) {
   )
   // Plugins that started before this endpoint had nothing to announce yet.
   yield* registry.refresh().pipe(Effect.forkScoped)
-  // The relays admit this endpoint only with a current token: renew it at 80% of its lifetime, retry after failures.
+  // The relays admit this endpoint only with a current token: renew it at 80% of its lifetime. Failures retry from 2
+  // seconds backing off to a minute, so a server that started before its network was up comes online quickly.
   yield* relay.token.pipe(
+    Effect.tapError((error) => Effect.logWarning("peer relay token unavailable", { error: String(error) })),
+    Effect.retry(Schedule.min([Schedule.exponential("2 seconds"), Schedule.spaced("60 seconds")])),
     Effect.tap((token) => Effect.promise(() => endpoint.setRelayToken(token.token))),
     Effect.map((token) => Duration.millis(Math.max(60_000, (token.expires - Date.now()) * 0.8))),
-    Effect.catch((error) =>
-      Effect.logWarning("peer relay token unavailable", { error: String(error) }).pipe(Effect.as(Duration.minutes(1))),
-    ),
     Effect.flatMap(Effect.sleep),
     Effect.forever,
     Effect.forkScoped,
@@ -154,7 +172,7 @@ const make = Effect.fnUntraced(function* (options: Options, relay: PeerRelay) {
   const servers = peers.pipe(Effect.map((list) => list.filter((peer) => peer.kind === "server")))
 
   // An unknown caller triggers at most one peer list refresh every 5 seconds. Three unknown attempts in a row block
-  // its key for an hour, rejecting it without any lookup.
+  // its key from triggering refreshes for an hour; a blocked key is still admitted once it is in the peer list.
   const failures = new Map<string, { readonly count: number; readonly at: number }>()
   const refreshed = { at: 0 }
   const known = (remote: string) => peers.pipe(Effect.map((list) => list.some((peer) => peer.id === remote)))
@@ -162,8 +180,7 @@ const make = Effect.fnUntraced(function* (options: Options, relay: PeerRelay) {
     const now = Date.now()
     const previous = failures.get(remote)
     const recent = previous && now - previous.at < BLOCK_MS ? previous.count : 0
-    if (recent >= 3) return false
-    if (!(yield* known(remote)) && now - refreshed.at >= 5_000) {
+    if (!(yield* known(remote)) && recent < 3 && now - refreshed.at >= 5_000) {
       refreshed.at = now
       yield* registry.refresh()
     }
@@ -171,6 +188,7 @@ const make = Effect.fnUntraced(function* (options: Options, relay: PeerRelay) {
       failures.delete(remote)
       return true
     }
+    if (recent >= 3) return false
     failures.forEach((entry, id) => now - entry.at >= BLOCK_MS && failures.delete(id))
     failures.set(remote, { count: recent + 1, at: now })
     return false
@@ -210,8 +228,14 @@ const make = Effect.fnUntraced(function* (options: Options, relay: PeerRelay) {
   // Outbound: one loopback listener per peer for the server's lifetime. Each TCP connection becomes a bi-stream on the
   // peer's iroh connection, which is re-dialed after it drops so clients keep their URL and token.
   const layerScope = yield* Scope.Scope
-  const gateways = new Map<string, Gateway & { connection: Connection }>()
-  const lock = yield* Semaphore.make(1)
+  const gateways = new Map<string, Dialed>()
+  // Dials are serialized per peer, so an unreachable peer never delays requests to the others.
+  const locks = new Map<string, Semaphore.Semaphore>()
+  const locked = <A, E, R>(id: string, effect: Effect.Effect<A, E, R>) => {
+    const lock = locks.get(id) ?? Semaphore.makeUnsafe(1)
+    locks.set(id, lock)
+    return lock.withPermits(1)(effect)
+  }
   yield* Effect.addFinalizer(() => Effect.sync(() => gateways.forEach((gateway) => gateway.connection.close())))
 
   const dial = Effect.fn("Peers.dial")(function* (id: string) {
@@ -241,12 +265,16 @@ const make = Effect.fnUntraced(function* (options: Options, relay: PeerRelay) {
     return { connection, token }
   })
 
-  // The first token stays valid across re-dials (it lasts until the peer's password changes or it expires).
-  const refresh = Effect.fn("Peers.refresh")(function* (id: string, gateway: Gateway & { connection: Connection }) {
+  // The first token stays valid across re-dials (it lasts until the peer's password changes or it expires). Callers
+  // pass the failure they saw before queueing; one that queued behind a failed re-dial gets its error instead of
+  // repeating it.
+  const refresh = Effect.fn("Peers.refresh")(function* (id: string, gateway: Dialed, seen: Unavailable | undefined) {
     if (gateway.connection.closeReason() === null) return gateway.connection
+    if (gateway.failure && gateway.failure !== seen) return yield* gateway.failure
     // The peer may have left or restarted on a new address since the list was last refreshed.
     yield* registry.refresh()
-    gateway.connection = (yield* dial(id)).connection
+    const dialed = yield* dial(id).pipe(Effect.tapError((error) => Effect.sync(() => (gateway.failure = error))))
+    gateway.connection = dialed.connection
     return gateway.connection
   })
 
@@ -258,20 +286,16 @@ const make = Effect.fnUntraced(function* (options: Options, relay: PeerRelay) {
       Effect.onError(() => Effect.sync(() => dialed.connection.close())),
     )
     const port = NetAddress.isInetAddress(server.address) ? server.address.port : 0
-    const gateway = { url: `http://127.0.0.1:${port}`, token: dialed.token, connection: dialed.connection }
+    const gateway: Dialed = { url: `http://127.0.0.1:${port}`, token: dialed.token, connection: dialed.connection }
     yield* server
       .run((socket) =>
-        lock
-          .withPermits(1)(refresh(id, gateway))
-          .pipe(
-            Effect.flatMap((connection) => Effect.tryPromise(() => connection.openBi())),
-            Effect.flatMap((stream) => pipe(socket, stream)),
-            // The socket server only closes sockets the handler read or wrote, so close it when the peer is unreachable.
-            Effect.tapCause(() =>
-              Effect.serviceOption(NetSocket).pipe(Effect.map(Option.map((conn) => conn.destroy()))),
-            ),
-            Effect.ignore,
-          ),
+        locked(id, refresh(id, gateway, gateway.failure)).pipe(
+          Effect.flatMap((connection) => Effect.tryPromise(() => connection.openBi())),
+          Effect.flatMap((stream) => pipe(socket, stream)),
+          // The socket server only closes sockets the handler read or wrote, so close it when the peer is unreachable.
+          Effect.tapCause(() => Effect.serviceOption(NetSocket).pipe(Effect.map(Option.map((conn) => conn.destroy())))),
+          Effect.ignore,
+        ),
       )
       .pipe(Effect.ignore, Effect.forkIn(layerScope))
     return gateway
@@ -289,14 +313,14 @@ const make = Effect.fnUntraced(function* (options: Options, relay: PeerRelay) {
       function* (id) {
         const existing = gateways.get(id)
         if (existing) {
-          yield* refresh(id, existing)
+          yield* refresh(id, existing, existing.failure)
           return { url: existing.url, token: existing.token }
         }
         const gateway = yield* open(id)
         gateways.set(id, gateway)
         return { url: gateway.url, token: gateway.token }
       },
-      (effect) => lock.withPermits(1)(effect),
+      (effect, id) => locked(id, effect),
     ),
   })
 })
