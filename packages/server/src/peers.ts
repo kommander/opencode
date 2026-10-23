@@ -4,7 +4,7 @@ import type { BiStream, Connection } from "@opencode-ai/iroh"
 import { Peer } from "@opencode/core/peer"
 import type { PeerEntry } from "@opencode/plugin/effect/global"
 import { Global } from "@opencode/util/global"
-import { Context, Effect, FiberSet, Layer, Schema, Scope, Semaphore } from "effect"
+import { Context, Effect, FiberSet, Layer, Option, Schema, Scope, Semaphore } from "effect"
 import { NetAddress } from "effect/net"
 import { Socket } from "effect/socket"
 import { randomBytes } from "node:crypto"
@@ -70,7 +70,7 @@ const make = Effect.fnUntraced(function* (options: Options) {
     try: () => import("@opencode-ai/iroh"),
     catch: (cause) => new Unavailable({ message: "Failed to load the iroh binding", cause }),
   })
-  const { makeNet } = yield* Effect.promise(() => import("@effect/platform-node/NodeSocket"))
+  const { makeNet, NetSocket } = yield* Effect.promise(() => import("@effect/platform-node/NodeSocket"))
   const NodeSocketServer = yield* Effect.promise(() => import("@effect/platform-node/NodeSocketServer"))
   const global = yield* Global.Service
   const registry = yield* Peer.Service
@@ -184,29 +184,19 @@ const make = Effect.fnUntraced(function* (options: Options) {
   const lock = yield* Semaphore.make(1)
   yield* Effect.addFinalizer(() => Effect.sync(() => gateways.forEach((gateway) => gateway.connection.close())))
 
-  const lookup = Effect.fn("Peers.lookup")(function* (id: string) {
+  const dial = Effect.fn("Peers.dial")(function* (id: string) {
     const instance = (yield* servers).find((peer) => peer.id === id)
     if (!instance) return yield* new Unavailable({ message: `Peer not found: ${id}` })
-    return instance
-  })
-  // iroh's TLS handshake proves the remote holds the dialed endpoint ID's key.
-  const reach = (instance: PeerEntry) =>
-    Effect.tryPromise({
+    // iroh's TLS handshake proves the remote holds the dialed endpoint ID's key.
+    const connection = yield* Effect.tryPromise({
       try: () =>
         endpoint.connect({
-          id: instance.id,
+          id,
           relay: instance.address?.relay ?? null,
           addresses: [...(instance.address?.addresses ?? [])],
         }),
       catch: (cause) => new Unavailable({ message: `Could not reach peer ${instance.name}`, cause }),
     })
-
-  const dial = Effect.fn("Peers.dial")(function* (id: string) {
-    const instance = yield* lookup(id)
-    // A failed dial may mean the peer restarted on a new address, so refresh the list and try once more.
-    const connection = yield* reach(instance).pipe(
-      Effect.catch(() => registry.refresh().pipe(Effect.andThen(lookup(id)), Effect.flatMap(reach))),
-    )
     const token = yield* Effect.gen(function* () {
       const control = yield* Effect.tryPromise(() => connection.openBi())
       yield* Effect.tryPromise(() => control.send.writeAll(HELLO))
@@ -224,6 +214,8 @@ const make = Effect.fnUntraced(function* (options: Options) {
   // The first token stays valid across re-dials (it lasts until the peer's password changes or it expires).
   const refresh = Effect.fn("Peers.refresh")(function* (id: string, gateway: Gateway & { connection: Connection }) {
     if (gateway.connection.closeReason() === null) return gateway.connection
+    // The peer may have left or restarted on a new address since the list was last refreshed.
+    yield* registry.refresh()
     gateway.connection = (yield* dial(id)).connection
     return gateway.connection
   })
@@ -244,6 +236,10 @@ const make = Effect.fnUntraced(function* (options: Options) {
           .pipe(
             Effect.flatMap((connection) => Effect.tryPromise(() => connection.openBi())),
             Effect.flatMap((stream) => pipe(socket, stream)),
+            // The socket server only closes sockets the handler read or wrote, so close it when the peer is unreachable.
+            Effect.tapCause(() =>
+              Effect.serviceOption(NetSocket).pipe(Effect.map(Option.map((conn) => conn.destroy()))),
+            ),
             Effect.ignore,
           ),
       )
