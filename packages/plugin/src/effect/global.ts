@@ -13,6 +13,13 @@ export interface PeerEntry {
   readonly updated: number
 }
 
+/** The relays a plugin provides for peer connections, and how to get the bearer token they require. */
+export interface PeerRelay {
+  readonly urls: ReadonlyArray<string>
+  /** Fetches a fresh token; the server renews it before `expires` (epoch milliseconds). */
+  readonly token: Effect.Effect<{ readonly token: string; readonly expires: number }, unknown>
+}
+
 /** Context of a built-in plugin's server-wide phase, which runs once per server process. */
 export interface GlobalContext {
   readonly credential: {
@@ -28,6 +35,8 @@ export interface GlobalContext {
     readonly self: () => Effect.Effect<Omit<PeerEntry, "updated"> | undefined>
     readonly add: (peer: PeerEntry) => Effect.Effect<void>
     readonly remove: (id: string) => Effect.Effect<void>
+    /** Turns on peer connections through these relays. Without a relay, the server starts no peer endpoint. */
+    readonly relay: (relay: PeerRelay) => Effect.Effect<void>
     /** Registers how this plugin refreshes its peers when the server needs a current list. */
     readonly onRefresh: (sync: Effect.Effect<void>) => Effect.Effect<void, never, Scope.Scope>
   }

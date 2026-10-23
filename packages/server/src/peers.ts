@@ -2,9 +2,9 @@ export * as Peers from "./peers"
 
 import type { BiStream, Connection } from "@opencode-ai/iroh"
 import { Peer } from "@opencode/core/peer"
-import type { PeerEntry } from "@opencode/plugin/effect/global"
+import type { PeerEntry, PeerRelay } from "@opencode/plugin/effect/global"
 import { Global } from "@opencode/util/global"
-import { Context, Effect, FiberSet, Layer, Option, Schema, Scope, Semaphore } from "effect"
+import { Context, Deferred, Duration, Effect, FiberSet, Layer, Option, Schema, Scope, Semaphore } from "effect"
 import { NetAddress } from "effect/net"
 import { Socket } from "effect/socket"
 import { randomBytes } from "node:crypto"
@@ -50,21 +50,37 @@ const unavailable = (message: string) =>
     connect: () => Effect.fail(new Unavailable({ message })),
   })
 
-export const disabled = Layer.succeed(Service, unavailable("Peer connections are not enabled on this server"))
+const disabledService = unavailable("Peer connections are not enabled on this server")
+export const disabled = Layer.succeed(Service, disabledService)
 
+// Peer connections stay off until a server-wide plugin provides the relays they use.
 export const layer = (options: Options) =>
   Layer.effect(
     Service,
-    make(options).pipe(
-      Effect.catch((error) =>
-        Effect.logWarning("peer connections unavailable", { error: error.message }).pipe(
-          Effect.as(unavailable(error.message)),
+    Effect.gen(function* () {
+      const registry = yield* Peer.Service
+      const ready = yield* Deferred.make<Interface>()
+      yield* registry.relay.pipe(
+        Effect.flatMap((relay) => make(options, relay)),
+        Effect.catch((error) =>
+          Effect.logWarning("peer connections unavailable", { error: error.message }).pipe(
+            Effect.as(unavailable(error.message)),
+          ),
         ),
-      ),
-    ),
+        Effect.flatMap((service) => Deferred.succeed(ready, service)),
+        Effect.forkScoped,
+      )
+      const current = Deferred.poll(ready).pipe(
+        Effect.flatMap(Option.match({ onNone: () => Effect.succeed(disabledService), onSome: (service) => service })),
+      )
+      return Service.of({
+        list: () => current.pipe(Effect.flatMap((service) => service.list())),
+        connect: (id) => current.pipe(Effect.flatMap((service) => service.connect(id))),
+      })
+    }),
   )
 
-const make = Effect.fnUntraced(function* (options: Options) {
+const make = Effect.fnUntraced(function* (options: Options, relay: PeerRelay) {
   // Loaded lazily so runtimes that never enable peers do not load the native binding.
   const { bind } = yield* Effect.tryPromise({
     try: () => import("@opencode-ai/iroh"),
@@ -92,17 +108,20 @@ const make = Effect.fnUntraced(function* (options: Options) {
     Effect.tryPromise({
       // Publishes nothing to public discovery; the directory carries addresses instead.
       // A dead peer's connection closes within ~10 s, so gateways re-dial instead of hanging.
-      try: () => bind({ secretKey: secret, alpn: ALPN, idleTimeoutMs: 10_000 }),
+      try: () => bind({ secretKey: secret, alpn: ALPN, idleTimeoutMs: 10_000, relayUrls: [...relay.urls] }),
       catch: (cause) => new Unavailable({ message: "Failed to start the peer endpoint", cause }),
     }),
     (endpoint) => Effect.promise(() => endpoint.close()),
   )
   const self = endpoint.id()
 
+  // Waits for a home relay on first use only; direct addresses are still announced without one.
+  const firstOnline = yield* Effect.cached(
+    Effect.promise(() => endpoint.online()).pipe(Effect.timeout("10 seconds"), Effect.ignore),
+  )
   yield* registry.setSelf(
     Effect.gen(function* () {
-      // Waits for a home relay on first use only; direct addresses are still announced without one.
-      yield* Effect.promise(() => endpoint.online()).pipe(Effect.timeout("10 seconds"), Effect.ignore)
+      yield* firstOnline
       const current = endpoint.addr()
       // Wildcard sockets are not dialable; loopback forms make same-host peers work immediately.
       const bound = endpoint
@@ -120,6 +139,17 @@ const make = Effect.fnUntraced(function* (options: Options) {
   )
   // Plugins that started before this endpoint had nothing to announce yet.
   yield* registry.refresh().pipe(Effect.forkScoped)
+  // The relays admit this endpoint only with a current token: renew it at 80% of its lifetime, retry after failures.
+  yield* relay.token.pipe(
+    Effect.tap((token) => Effect.promise(() => endpoint.setRelayToken(token.token))),
+    Effect.map((token) => Duration.millis(Math.max(60_000, (token.expires - Date.now()) * 0.8))),
+    Effect.catch((error) =>
+      Effect.logWarning("peer relay token unavailable", { error: String(error) }).pipe(Effect.as(Duration.minutes(1))),
+    ),
+    Effect.flatMap(Effect.sleep),
+    Effect.forever,
+    Effect.forkScoped,
+  )
   const peers = registry.list().pipe(Effect.map((list) => list.filter((peer) => peer.id !== self)))
   // Only servers can be dialed; clients connect in.
   const servers = peers.pipe(Effect.map((list) => list.filter((peer) => peer.kind === "server")))

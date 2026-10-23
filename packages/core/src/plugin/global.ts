@@ -31,6 +31,7 @@ export const layer = Layer.effectDiscard(
             add: (peer) => peers.add(plugin.id, peer),
             remove: (id) => peers.remove(plugin.id, id),
             onRefresh: peers.onRefresh,
+            relay: peers.setRelay,
           },
         })
         yield* Effect.never

@@ -5,6 +5,15 @@ import { Effect, Schedule, Schema, Scope, Semaphore } from "effect"
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http"
 import { credentialHeaders, methodID, oauth, OpencodePlugin } from "./opencode.js"
 
+// Our iroh relays; they admit only endpoints holding a relay token from the peer directory.
+const relays = [
+  "https://us-east.opencoderelay.com",
+  "https://eu-central.opencoderelay.com",
+  "https://ap-southeast.opencoderelay.com",
+]
+
+const RelayToken = Schema.Struct({ token: Schema.String, expires: Schema.Number })
+
 const Directory = Schema.Struct({
   instances: Schema.Array(
     Schema.Struct({
@@ -82,5 +91,17 @@ export const Plugin = define<HttpClient.HttpClient | Scope.Scope>({
     )
     yield* ctx.peer.onRefresh(sync)
     yield* sync.pipe(Effect.repeat(Schedule.spaced("60 seconds")), Effect.forkScoped)
+    // Relay tokens are issued per directory entry, so announce before asking for one.
+    yield* ctx.peer.relay({
+      urls: relays,
+      token: Effect.gen(function* () {
+        yield* sync
+        const self = yield* ctx.peer.self()
+        const auth = yield* headers
+        if (!self || !auth) return yield* Effect.fail(new Error("Sign in to OpenCode Console to use peer connections"))
+        const response = yield* send(HttpClientRequest.post(`${base}/v1/instances/${self.id}/relay-token`), auth)
+        return yield* HttpClientResponse.schemaBodyJson(RelayToken)(response)
+      }),
+    })
   }),
 })
