@@ -16,6 +16,7 @@ import { ServerAuth } from "./auth"
 const ALPN = "opencode/peer/1"
 const HELLO = new TextEncoder().encode("opencode/peer/1 hello")
 const CHUNK = 64 * 1024
+const BLOCK_MS = 60 * 60 * 1000
 
 /** A loopback URL that reaches the peer, and the token its server accepts as the Basic password for user "opencode". */
 interface Gateway {
@@ -119,11 +120,33 @@ const make = Effect.fnUntraced(function* (options: Options) {
   // Only servers can be dialed; clients connect in.
   const servers = peers.pipe(Effect.map((list) => list.filter((peer) => peer.kind === "server")))
 
-  // Inbound: only servers in the peer list get a session token and a pipe to this server.
+  // An unknown caller triggers at most one peer list refresh every 5 seconds. Three unknown attempts in a row block
+  // its key for an hour, rejecting it without any lookup.
+  const failures = new Map<string, { readonly count: number; readonly at: number }>()
+  const refreshed = { at: 0 }
+  const known = (remote: string) => peers.pipe(Effect.map((list) => list.some((peer) => peer.id === remote)))
+  const admit = Effect.fn("Peers.admit")(function* (remote: string) {
+    const now = Date.now()
+    const previous = failures.get(remote)
+    const recent = previous && now - previous.at < BLOCK_MS ? previous.count : 0
+    if (recent >= 3) return false
+    if (!(yield* known(remote)) && now - refreshed.at >= 5_000) {
+      refreshed.at = now
+      yield* registry.refresh()
+    }
+    if (yield* known(remote)) {
+      failures.delete(remote)
+      return true
+    }
+    failures.forEach((entry, id) => now - entry.at >= BLOCK_MS && failures.delete(id))
+    failures.set(remote, { count: recent + 1, at: now })
+    return false
+  })
+
+  // Inbound: only peers in the peer list get a session token and a pipe to this server.
   const serve = Effect.fn("Peers.serve")(
     function* (connection: Connection) {
-      const remote = connection.remoteId().toString()
-      if (!(yield* peers).some((peer) => peer.id === remote)) return
+      if (!(yield* admit(connection.remoteId()))) return
       const token = ServerAuth.issueSession(auth)
       if (token === undefined) return
       const control = yield* Effect.tryPromise(() => connection.acceptBi())
@@ -158,19 +181,29 @@ const make = Effect.fnUntraced(function* (options: Options) {
   const lock = yield* Semaphore.make(1)
   yield* Effect.addFinalizer(() => Effect.sync(() => gateways.forEach((gateway) => gateway.connection.close())))
 
-  const dial = Effect.fn("Peers.dial")(function* (id: string) {
+  const lookup = Effect.fn("Peers.lookup")(function* (id: string) {
     const instance = (yield* servers).find((peer) => peer.id === id)
     if (!instance) return yield* new Unavailable({ message: `Peer not found: ${id}` })
-    // iroh's TLS handshake proves the remote holds the dialed endpoint ID's key.
-    const connection = yield* Effect.tryPromise({
-      try: async () =>
+    return instance
+  })
+  // iroh's TLS handshake proves the remote holds the dialed endpoint ID's key.
+  const reach = (instance: PeerEntry) =>
+    Effect.tryPromise({
+      try: () =>
         endpoint.connect({
-          id,
+          id: instance.id,
           relay: instance.address?.relay ?? null,
           addresses: [...(instance.address?.addresses ?? [])],
         }),
       catch: (cause) => new Unavailable({ message: `Could not reach peer ${instance.name}`, cause }),
     })
+
+  const dial = Effect.fn("Peers.dial")(function* (id: string) {
+    const instance = yield* lookup(id)
+    // A failed dial may mean the peer restarted on a new address, so refresh the list and try once more.
+    const connection = yield* reach(instance).pipe(
+      Effect.catch(() => registry.refresh().pipe(Effect.andThen(lookup(id)), Effect.flatMap(reach))),
+    )
     const token = yield* Effect.gen(function* () {
       const control = yield* Effect.tryPromise(() => connection.openBi())
       yield* Effect.tryPromise(() => control.send.writeAll(HELLO))
@@ -217,7 +250,8 @@ const make = Effect.fnUntraced(function* (options: Options) {
 
   return Service.of({
     list: () =>
-      servers.pipe(
+      registry.refresh().pipe(
+        Effect.andThen(servers),
         Effect.map((list) =>
           list.map((peer) => ({ ...peer, connected: gateways.get(peer.id)?.connection.closeReason() === null })),
         ),

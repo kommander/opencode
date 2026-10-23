@@ -1,7 +1,7 @@
 export * as OpencodePeersPlugin from "./opencode-peers.js"
 
 import { define } from "@opencode/plugin/effect/global"
-import { Effect, Schedule, Schema, Scope } from "effect"
+import { Effect, Schedule, Schema, Scope, Semaphore } from "effect"
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http"
 import { credentialHeaders, methodID, oauth, OpencodePlugin } from "./opencode.js"
 
@@ -53,7 +53,8 @@ export const Plugin = define<HttpClient.HttpClient | Scope.Scope>({
       }).pipe(Effect.timeout("3 seconds"), Effect.ignore),
     )
     // The announce is this server's heartbeat and returns the account's instances, which replace this plugin's peers.
-    yield* Effect.gen(function* () {
+    const lock = yield* Semaphore.make(1)
+    const sync = Effect.gen(function* () {
       const self = yield* ctx.peer.self()
       const auth = yield* headers
       const instances =
@@ -77,8 +78,9 @@ export const Plugin = define<HttpClient.HttpClient | Scope.Scope>({
       current.forEach((id) => listed.add(id))
     }).pipe(
       Effect.catch((error) => Effect.logWarning("peer directory sync failed", { error: String(error) })),
-      Effect.repeat(Schedule.spaced("60 seconds")),
-      Effect.forkScoped,
+      lock.withPermits(1),
     )
+    yield* ctx.peer.onRefresh(sync)
+    yield* sync.pipe(Effect.repeat(Schedule.spaced("60 seconds")), Effect.forkScoped)
   }),
 })

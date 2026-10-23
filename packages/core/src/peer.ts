@@ -2,7 +2,7 @@ export * as Peer from "./peer.js"
 
 import type { PeerEntry } from "@opencode/plugin/effect/global"
 import { makeGlobalNode } from "@opencode/util/effect/app-node"
-import { Context, Effect, Layer } from "effect"
+import { Context, Effect, Layer, Scope } from "effect"
 
 type Self = Omit<PeerEntry, "updated">
 
@@ -14,6 +14,9 @@ export interface Interface {
   readonly remove: (owner: string, id: string) => Effect.Effect<void>
   readonly clear: (owner: string) => Effect.Effect<void>
   readonly list: () => Effect.Effect<PeerEntry[]>
+  readonly onRefresh: (sync: Effect.Effect<void>) => Effect.Effect<void, never, Scope.Scope>
+  /** Runs every registered plugin refresh, giving up on each after a few seconds. */
+  readonly refresh: () => Effect.Effect<void>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/Peer") {}
@@ -21,6 +24,7 @@ export class Service extends Context.Service<Service, Interface>()("@opencode/Pe
 const layer = Layer.sync(Service, () => {
   const peers = new Map<string, { readonly owner: string; readonly peer: PeerEntry }>()
   let self: Effect.Effect<Self> | undefined
+  const syncs = new Set<Effect.Effect<void>>()
   const remove = (owner: string, id: string) => {
     if (peers.get(id)?.owner === owner) peers.delete(id)
   }
@@ -31,6 +35,16 @@ const layer = Layer.sync(Service, () => {
     remove: (owner, id) => Effect.sync(() => remove(owner, id)),
     clear: (owner) => Effect.sync(() => [...peers.keys()].forEach((id) => remove(owner, id))),
     list: () => Effect.sync(() => [...peers.values()].map((item) => item.peer)),
+    onRefresh: (sync) =>
+      Effect.acquireRelease(
+        Effect.sync(() => void syncs.add(sync)),
+        () => Effect.sync(() => void syncs.delete(sync)),
+      ),
+    refresh: () =>
+      Effect.forEach([...syncs], (sync) => sync.pipe(Effect.timeout("5 seconds"), Effect.ignore), {
+        concurrency: "unbounded",
+        discard: true,
+      }),
   })
 })
 

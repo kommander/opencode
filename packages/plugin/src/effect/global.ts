@@ -28,6 +28,8 @@ export interface GlobalContext {
     readonly self: () => Effect.Effect<Omit<PeerEntry, "updated"> | undefined>
     readonly add: (peer: PeerEntry) => Effect.Effect<void>
     readonly remove: (id: string) => Effect.Effect<void>
+    /** Registers how this plugin refreshes its peers when the server needs a current list. */
+    readonly onRefresh: (sync: Effect.Effect<void>) => Effect.Effect<void, never, Scope.Scope>
   }
 }
 
