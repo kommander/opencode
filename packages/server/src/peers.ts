@@ -4,19 +4,7 @@ import type { BiStream, Connection } from "@opencode-ai/iroh"
 import { Peer } from "@opencode/core/peer"
 import type { PeerEntry, PeerRelay } from "@opencode/plugin/effect/global"
 import { Global } from "@opencode/util/global"
-import {
-  Context,
-  Deferred,
-  Duration,
-  Effect,
-  FiberSet,
-  Layer,
-  Option,
-  Schedule,
-  Schema,
-  Scope,
-  Semaphore,
-} from "effect"
+import { Context, Deferred, Effect, FiberSet, Layer, Option, Schedule, Schema, Scope, Semaphore } from "effect"
 import { NetAddress } from "effect/net"
 import { Socket } from "effect/socket"
 import { randomBytes } from "node:crypto"
@@ -154,15 +142,17 @@ const make = Effect.fnUntraced(function* (options: Options, relay: PeerRelay) {
   )
   // Plugins that started before this endpoint had nothing to announce yet.
   yield* registry.refresh().pipe(Effect.forkScoped)
-  // The relays admit this endpoint only with a current token: renew it at 80% of its lifetime. Failures retry from 2
-  // seconds backing off to a minute, so a server that started before its network was up comes online quickly.
-  yield* relay.token.pipe(
+  // Relays check the token only when the endpoint connects, and drop the connection when the token expires, so a new
+  // token is fetched only when a relay denies the current one; the loop ends when the endpoint closes. Fetch failures
+  // retry from 2 seconds backing off to a minute, so a server that started before its network was up comes online fast.
+  const setToken = relay.token.pipe(
     Effect.tapError((error) => Effect.logWarning("peer relay token unavailable", { error: String(error) })),
     Effect.retry(Schedule.min([Schedule.exponential("2 seconds"), Schedule.spaced("60 seconds")])),
-    Effect.tap((token) => Effect.promise(() => endpoint.setRelayToken(token.token))),
-    Effect.map((token) => Duration.millis(Math.max(60_000, (token.expires - Date.now()) * 0.8))),
-    Effect.flatMap(Effect.sleep),
-    Effect.forever,
+    Effect.flatMap((token) => Effect.promise(() => endpoint.setRelayToken(token.token))),
+  )
+  yield* setToken.pipe(
+    Effect.andThen(Effect.promise(() => endpoint.relayAuthDenied())),
+    Effect.repeat({ while: (denied) => denied !== null }),
     Effect.forkScoped,
   )
   // Announce the relay URL as soon as the first token brings the endpoint online, not at the next plugin heartbeat.
