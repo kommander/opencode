@@ -27,7 +27,7 @@
   "dependencies": {
     "@effect/platform-node": "catalog:",
     "@effect/platform-node-shared": "catalog:",
-    "@opencode-ai/iroh": "https://github.com/kommander/opencode-iroh/releases/download/v0.1.0/opencode-ai-iroh-0.1.0.tgz",
+    "@opencode-ai/iroh": "https://github.com/kommander/opencode-iroh/releases/download/v0.1.1/opencode-ai-iroh-0.1.1.tgz",
     "@opencode/core": "workspace:*",
     "@opencode/protocol": "workspace:*",
     "@opencode/schema": "workspace:*",

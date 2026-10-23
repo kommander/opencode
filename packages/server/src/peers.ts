@@ -91,7 +91,8 @@ const make = Effect.fnUntraced(function* (options: Options) {
   const endpoint = yield* Effect.acquireRelease(
     Effect.tryPromise({
       // Publishes nothing to public discovery; the directory carries addresses instead.
-      try: () => bind({ secretKey: secret, alpn: ALPN }),
+      // A dead peer's connection closes within ~10 s, so gateways re-dial instead of hanging.
+      try: () => bind({ secretKey: secret, alpn: ALPN, idleTimeoutMs: 10_000 }),
       catch: (cause) => new Unavailable({ message: "Failed to start the peer endpoint", cause }),
     }),
     (endpoint) => Effect.promise(() => endpoint.close()),
@@ -116,6 +117,8 @@ const make = Effect.fnUntraced(function* (options: Options) {
       }
     }),
   )
+  // Plugins that started before this endpoint had nothing to announce yet.
+  yield* registry.refresh().pipe(Effect.forkScoped)
   const peers = registry.list().pipe(Effect.map((list) => list.filter((peer) => peer.id !== self)))
   // Only servers can be dialed; clients connect in.
   const servers = peers.pipe(Effect.map((list) => list.filter((peer) => peer.kind === "server")))
