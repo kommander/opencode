@@ -30,6 +30,7 @@ import { Plugin } from "@opencode/core/plugin"
 import { PluginHooks } from "@opencode/core/plugin/hooks"
 import { Provider } from "@opencode/core/provider"
 import { Session } from "@opencode/core/session"
+import { SessionStore } from "@opencode/core/session/store"
 import { SharedCache } from "@opencode/core/shared-cache"
 import { InstructionEntry } from "@opencode/core/session/instruction-entry"
 import { PersistentPty } from "@opencode/core/persistent-pty"
@@ -121,6 +122,7 @@ export const makePluginTestLayer = (permission = permissionLayer, generate = gen
       KV.node,
       Mcp.node,
       Session.node,
+      SessionStore.node,
       SharedCache.node,
       InstructionEntry.node,
       PersistentPty.node,

@@ -16665,6 +16665,9 @@
               "schedules": {
                 "type": "boolean"
               },
+              "session_search": {
+                "type": "boolean"
+              },
               "artifacts": {
                 "type": "boolean"
               },

@@ -14,6 +14,7 @@ export const registry = {
     "Enable experimental background compaction: summarize the conversation in the background as it nears the compaction threshold, so automatic compaction does not wait for the summary. Background summaries that are never used still cost tokens.",
   media_blob: "Store new session media once in a deduplicated blob table instead of inline in every message row.",
   schedules: "Enable experimental scheduled tasks that wake a session with a prompt.",
+  session_search: "Let agents search and inspect session history in their current location.",
   artifacts: "Enable experimental artifacts backed by pluggable providers.",
   shell_timeout_background: "Move foreground shell commands to the background when their timeout expires.",
   console_watches:
