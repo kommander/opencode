@@ -126,7 +126,13 @@ export { TurnRangeError }
 
 export interface Interface {
   /** A cursor carries the filters of the request that produced it, so filters passed with a cursor are ignored. */
-  readonly list: (input?: ListFilter & { readonly limit?: number; readonly cursor?: ListCursor }) => Effect.Effect<
+  readonly list: (
+    input?: ListFilter & {
+      readonly limit?: number
+      readonly cursor?: ListCursor
+      readonly workspaceID?: Location.Ref["workspaceID"] | null
+    },
+  ) => Effect.Effect<
     {
       readonly data: SessionSchema.Info[]
       readonly cursor: { readonly previous?: ListCursor; readonly next?: ListCursor }

@@ -15,7 +15,8 @@ import { SessionMessageTable, SessionTable } from "./sql.js"
 import { fromRow } from "./info.js"
 
 const ListInputBase = {
-  workspaceID: Workspace.ID.pipe(Schema.optional),
+  // Omitted lists all workspaces; null selects implicit-local placement only.
+  workspaceID: Schema.NullOr(Workspace.ID).pipe(Schema.optional),
   search: Schema.String.pipe(Schema.optional),
   limit: PositiveInt.pipe(Schema.optional),
   order: Schema.Literals(["asc", "desc"]).pipe(Schema.optional),
@@ -158,7 +159,12 @@ const layer = Layer.effect(
         const sortColumn = SessionTable.time_updated
         const conditions: SQL[] = []
         if ("directory" in input) conditions.push(eq(SessionTable.directory, input.directory))
-        if (input.workspaceID) conditions.push(eq(SessionTable.workspace_id, input.workspaceID))
+        if (input.workspaceID !== undefined)
+          conditions.push(
+            input.workspaceID === null
+              ? isNull(SessionTable.workspace_id)
+              : eq(SessionTable.workspace_id, input.workspaceID),
+          )
         if ("project" in input) conditions.push(eq(SessionTable.project_id, input.project))
         if ("project" in input && input.subpath !== undefined) conditions.push(eq(SessionTable.path, input.subpath))
         if (input.search) conditions.push(like(SessionTable.title, `%${input.search}%`))

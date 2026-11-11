@@ -15,6 +15,7 @@ import { Permission } from "./permission.js"
 import { TokenUsage } from "./token-usage.js"
 import { Revert } from "./session-revert.js"
 import { SessionFork } from "./session-fork.js"
+import { WorkspaceID } from "./workspace-id.js"
 
 export const ID = SessionID
 export type ID = SessionID
@@ -109,15 +110,19 @@ export const ListFilter = Schema.Struct({
 }).annotate({ identifier: "Session.ListFilter" })
 export interface ListFilter extends Schema.Schema.Type<typeof ListFilter> {}
 
+const ListCursorFields = {
+  ...ListFilterFields,
+  workspaceID: optional(Schema.NullOr(WorkspaceID)),
+  anchor: ListAnchor,
+}
 const ListCursorInput = Schema.Union([
-  Schema.Struct({ ...ListFilterFields, directory: AbsolutePath, anchor: ListAnchor }),
+  Schema.Struct({ ...ListCursorFields, directory: AbsolutePath }),
   Schema.Struct({
-    ...ListFilterFields,
+    ...ListCursorFields,
     project: Project.ID,
     subpath: RelativePath.pipe(Schema.optional),
-    anchor: ListAnchor,
   }),
-  Schema.Struct({ ...ListFilterFields, anchor: ListAnchor }),
+  Schema.Struct(ListCursorFields),
 ])
 const ListCursorJson = Schema.fromJsonString(ListCursorInput)
 const encodeListCursor = Schema.encodeSync(ListCursorJson)
