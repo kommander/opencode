@@ -1,0 +1,16 @@
+{
+  "name": "opencode-session-search",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./index.ts"
+  },
+  "dependencies": {
+    "@opencode/schema": "2.2.7"
+  },
+  "peerDependencies": {
+    "@opencode/plugin": "^2.2.7",
+    "effect": "^4.1.0"
+  }
+}
