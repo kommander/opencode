@@ -1,7 +1,7 @@
 export * as Permission from "./permission.js"
 
 import { makeLocationNode } from "@opencode/util/effect/app-node"
-import { Context, Deferred, Effect, Layer, Schema } from "effect"
+import { Context, Deferred, Effect, Layer, PubSub, Schema, Stream } from "effect"
 import { Permission } from "@opencode/schema/permission"
 import type { Tool } from "@opencode/schema/tool"
 import { Bus } from "./bus.js"
@@ -119,6 +119,7 @@ export interface Interface {
   readonly get: (id: ID) => Effect.Effect<Request | undefined>
   readonly forSession: (sessionID: SessionSchema.ID) => Effect.Effect<ReadonlyArray<Request>>
   readonly list: () => Effect.Effect<ReadonlyArray<Request>>
+  readonly pendingChanges: Stream.Stream<SessionSchema.ID>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/Permission") {}
@@ -139,6 +140,10 @@ const layer = Layer.effect(
     const saved = yield* PermissionSaved.Service
     const hooks = yield* PluginHooks.Service
     const pending = new Map<ID, Pending>()
+    const changes = yield* PubSub.unbounded<SessionSchema.ID>()
+    const remove = Effect.fnUntraced(function* (item: Pending) {
+      if (pending.delete(item.request.id)) yield* PubSub.publish(changes, item.request.sessionID)
+    })
     let closed = false
 
     const close = Effect.gen(function* () {
@@ -152,7 +157,7 @@ const layer = Layer.effect(
           })
           .pipe(Effect.ensuring(Deferred.fail(item.deferred, new DeclinedError()))),
       )
-      pending.clear()
+      yield* Effect.forEach(Array.from(pending.values()), remove, { discard: true })
     }).pipe(Effect.uninterruptible)
     yield* Effect.addFinalizer(() => close)
 
@@ -241,6 +246,7 @@ const layer = Layer.effect(
           yield* bus
             .publish(Permission.Event.Asked, request)
             .pipe(Effect.onError(() => Effect.sync(() => pending.delete(request.id))))
+          yield* PubSub.publish(changes, request.sessionID)
           return item
         }),
       )
@@ -276,11 +282,7 @@ const layer = Layer.effect(
               // WITH feedback (CorrectedError) intentionally stays typed so the leaf can turn
               // it into ToolFailure and the model continues.
               Effect.catchTag("Permission.DeclinedError", (error) => Effect.die(error)),
-              Effect.ensuring(
-                Effect.sync(() => {
-                  pending.delete(item.request.id)
-                }),
-              ),
+              Effect.ensuring(remove(item)),
             )
           }),
         )
@@ -319,8 +321,8 @@ const layer = Layer.effect(
               existing.deferred,
               input.message ? new CorrectedError({ feedback: input.message }) : new DeclinedError(),
             )
-            pending.delete(input.requestID)
-            for (const [id, item] of pending) {
+            yield* remove(existing)
+            for (const item of pending.values()) {
               if (item.request.sessionID !== existing.request.sessionID) continue
               yield* bus.publish(Permission.Event.Replied, {
                 sessionID: item.request.sessionID,
@@ -332,7 +334,7 @@ const layer = Layer.effect(
                 item.deferred,
                 input.message ? new CorrectedError({ feedback: input.message }) : new DeclinedError(),
               )
-              pending.delete(id)
+              yield* remove(item)
             }
             return
           }
@@ -345,10 +347,10 @@ const layer = Layer.effect(
             })
           }
           yield* Deferred.succeed(existing.deferred, undefined)
-          pending.delete(input.requestID)
+          yield* remove(existing)
           if (input.reply !== "always" || !existing.request.save?.length) return
 
-          for (const [id, item] of pending) {
+          for (const item of pending.values()) {
             const result = yield* evaluateInput({ ...item.request, agent: item.agent }).pipe(
               Effect.catchTag("Session.NotFoundError", () => Effect.undefined),
             )
@@ -359,7 +361,7 @@ const layer = Layer.effect(
               reply: "always",
             })
             yield* Deferred.succeed(item.deferred, undefined)
-            pending.delete(id)
+            yield* remove(item)
           }
         }),
       ),
@@ -377,7 +379,18 @@ const layer = Layer.effect(
       return Array.from(pending.values(), (item) => item.request).filter((request) => request.sessionID === sessionID)
     })
 
-    return Service.of({ ask, assert, assertNotDenied, allows, reply, get, forSession, list, close })
+    return Service.of({
+      ask,
+      assert,
+      assertNotDenied,
+      allows,
+      reply,
+      get,
+      forSession,
+      list,
+      close,
+      pendingChanges: Stream.fromPubSub(changes),
+    })
   }),
 )
 

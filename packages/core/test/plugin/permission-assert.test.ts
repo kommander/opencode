@@ -6,7 +6,7 @@ import { PluginPromise } from "@opencode/core/plugin/promise"
 import { Tool } from "@opencode/core/tool"
 import type { PermissionDomain } from "@opencode/plugin/promise/permission"
 import { Session } from "@opencode/schema/session"
-import { Cause, Effect, Exit, Layer, Option } from "effect"
+import { Cause, Effect, Exit, Layer, Option, Stream } from "effect"
 import { testEffect } from "../lib/effect"
 import { makePluginTestLayer } from "./fixture"
 
@@ -16,6 +16,7 @@ const asserted: Permission.AssertInput[] = []
 const permission = Layer.succeed(
   Permission.Service,
   Permission.Service.of({
+    pendingChanges: Stream.never,
     close: Effect.void,
     ask: (input) => Effect.succeed({ id: input.id ?? Permission.ID.create(), effect: "ask" }),
     assert: (input) => {

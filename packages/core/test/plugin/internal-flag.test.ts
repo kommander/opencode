@@ -1,12 +1,16 @@
 import { describe, expect } from "bun:test"
-import { Duration, Effect, Layer, LayerMap, Stream } from "effect"
+import { Duration, Effect, Layer, LayerMap, Queue, Stream } from "effect"
 import { App } from "@opencode/core/app"
 import { ConfigPluginSource } from "@opencode/core/config/plugin/source"
+import { Form } from "@opencode/core/form"
 import { AppNodeBuilder } from "@opencode/core/effect/app-node-builder"
 import { Instance } from "@opencode/core/instance"
 import { Location } from "@opencode/core/location"
 import { LocationServiceMap } from "@opencode/core/location-services"
 import { Plugin } from "@opencode/core/plugin"
+import { Rpc } from "@opencode/core/rpc"
+import { Session } from "@opencode/core/session"
+import { SessionAttention } from "@opencode/schema/session-attention"
 import { SdkPlugins } from "@opencode/core/plugin/sdk"
 import { AbsolutePath } from "@opencode/core/schema"
 import { Tool } from "@opencode/core/tool"
@@ -64,14 +68,40 @@ const instances = Layer.effect(
 )
 
 const it = testEffect(
-  AppNodeBuilder.build(LayerNode.group([Database.node, Bus.node, SdkPlugins.node, LocationServiceMap.node]), [
-    Global.node.replace(tempGlobalLayer),
-    offlineModels,
-    LocationServiceMap.node.replace(instances),
-  ]),
+  AppNodeBuilder.build(
+    LayerNode.group([Database.node, Bus.node, SdkPlugins.node, LocationServiceMap.node, Session.node]),
+    [Global.node.replace(tempGlobalLayer), offlineModels, LocationServiceMap.node.replace(instances)],
+  ),
 )
 
 describe("PluginInternal flags", () => {
+  it.live("publishes an attention invalidation when admitted user input reopens completed work", () =>
+    Effect.gen(function* () {
+      const directory = yield* tmpdirScoped()
+      const location = Location.Ref.make({ directory: AbsolutePath.make(directory.path) })
+      const locations = yield* LocationServiceMap.Service
+      yield* Effect.gen(function* () {
+        const plugins = yield* Plugin.Service
+        yield* plugins.awaitActivation
+        const rpc = yield* Rpc.Service
+        const client = rpc.client(SessionAttention.Definition)
+        const sessions = yield* Session.Service
+        const { id: sessionID } = yield* sessions.create({ location })
+        expect(yield* client.complete({ sessionID })).toBe("completed")
+        const events = yield* client.events.subscribe("changed").pipe(Stream.toQueue({ capacity: 8 }))
+        yield* sessions.prompt({ sessionID, text: "One more thing", resume: false })
+        expect((yield* Queue.take(events)).data.sessionID).toBe(sessionID)
+        expect(yield* client.get({ sessionID })).toBe("cleared")
+        const forms = yield* Form.Service
+        const form = yield* forms.create({ sessionID, title: "Choose", fields: [{ key: "answer", type: "string" }] })
+        yield* Queue.take(events)
+        expect(yield* client.get({ sessionID })).toBe("needs_form")
+        yield* forms.cancel(form.id)
+        yield* Queue.take(events)
+        expect(yield* client.get({ sessionID })).toBe("cleared")
+      }).pipe(Effect.scoped, Effect.provide(locations.get(location)))
+    }),
+  )
   it.live("turns a flagged built-in tool on for a dev-channel server with no config", () =>
     Effect.gen(function* () {
       const directory = yield* tmpdirScoped()

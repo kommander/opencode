@@ -1,7 +1,7 @@
 export * as Form from "./form.js"
 
 import { Form } from "@opencode/schema/form"
-import { Cache, Context, Deferred, Duration, Effect, Exit, Layer, Option, Schema } from "effect"
+import { Cache, Context, Deferred, Duration, Effect, Exit, Layer, Option, PubSub, Schema, Stream } from "effect"
 import { makeLocationNode } from "@opencode/util/effect/app-node"
 import { Bus } from "./bus.js"
 
@@ -83,6 +83,8 @@ export interface ListInput {
 }
 
 export interface Interface {
+  /** Invalidates pending snapshots after the form owner has committed the change. */
+  readonly pendingChanges: Stream.Stream<string>
   readonly close: Effect.Effect<void>
   readonly create: (input: CreateInput) => Effect.Effect<Info, AlreadyExistsError | InvalidFormError>
   readonly ask: (input: CreateInput) => Effect.Effect<TerminalState, AlreadyExistsError | InvalidFormError>
@@ -105,6 +107,7 @@ export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const bus = yield* Bus.Service
+    const changes = yield* PubSub.unbounded<string>()
     let closed = false
     const forms = yield* Cache.makeWith<ID, Entry>(
       () => Effect.die(new Error("Form cache must be used via set/getSuccess, never get")),
@@ -143,6 +146,7 @@ export const layer = Layer.effect(
           }
           yield* Cache.set(forms, id, entry)
           yield* bus.publish(Form.Event.Created, { form }).pipe(Effect.onError(() => Cache.invalidate(forms, id)))
+          yield* PubSub.publish(changes, form.sessionID)
           if (closed) yield* cancel(id).pipe(Effect.orDie)
           return form
         }),
@@ -191,6 +195,7 @@ export const layer = Layer.effect(
             answer: input.answer,
           })
           yield* Cache.set(forms, input.id, { ...entry, state: next })
+          yield* PubSub.publish(changes, entry.form.sessionID)
           yield* Deferred.succeed(entry.deferred, next)
         }),
       ),
@@ -207,6 +212,7 @@ export const layer = Layer.effect(
           }
           yield* bus.publish(Form.Event.Cancelled, { id, sessionID: entry.form.sessionID })
           yield* Cache.set(forms, id, { ...entry, state: next })
+          yield* PubSub.publish(changes, entry.form.sessionID)
           yield* Deferred.succeed(entry.deferred, next)
         }),
       ),
@@ -226,7 +232,17 @@ export const layer = Layer.effect(
     )
     yield* Effect.addFinalizer(() => close)
 
-    return Service.of({ create, ask, get, list, state, reply, cancel, close })
+    return Service.of({
+      create,
+      ask,
+      get,
+      list,
+      state,
+      reply,
+      cancel,
+      close,
+      pendingChanges: Stream.fromPubSub(changes),
+    })
   }),
 )
 

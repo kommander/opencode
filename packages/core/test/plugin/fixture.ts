@@ -46,7 +46,7 @@ import { Vcs } from "@opencode/core/vcs"
 import { WebSearch } from "@opencode/core/websearch"
 import { Worktree } from "@opencode/core/worktree"
 import { WorktreeStrategies } from "@opencode/core/worktree/strategies"
-import { Effect, Layer } from "effect"
+import { Effect, Layer, Stream } from "effect"
 import { tempLocationLayer } from "../fixture/location"
 import { emptyMcpLayer } from "../fixture/mcp"
 import { offlineModels } from "../fixture/models"
@@ -76,6 +76,7 @@ const configLayer = Config.testLayer()
 const permissionLayer = Layer.succeed(
   Permission.Service,
   Permission.Service.of({
+    pendingChanges: Stream.never,
     close: Effect.void,
     ask: (input) => Effect.succeed({ id: input.id ?? Permission.ID.create(), effect: "ask" }),
     assert: () => Effect.void,
