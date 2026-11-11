@@ -26,6 +26,10 @@ export class Info extends Schema.Class<Info>("ConfigExperimental.Info")({
     description:
       "Write each assistant part as its own session_part row instead of rewriting the whole message on every event. Defaults to false.",
   }),
+  attention_model: ConfigModel.Selection.pipe(optional).annotate({
+    description:
+      "Model for classifying whether a session's final assistant reply needs a response, as providerID/modelID with an optional #variant. When omitted, no classification request is made.",
+  }),
   image_generate: Schema.Union([
     Schema.Boolean,
     Schema.Struct({
