@@ -35,6 +35,7 @@
   },
   "workspaces": {
     "packages": [
+      "examples/session-search",
       "packages/*",
       "packages/plugins/*",
       "services/*",

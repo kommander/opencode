@@ -4,7 +4,7 @@ A private, opt-in Effect server plugin for browsing session history. It requires
 
 ## Run locally
 
-1. From the repository root, run `bun install --cwd examples/session-search` to install the local package's dependencies. No build or publish step is needed.
+1. From the repository root, run `bun install --frozen-lockfile`. The example is a workspace package for development; it is **not** a built-in or enabled by default. No build or publish step is needed.
 2. Add the package directory to your project's `opencode.jsonc` (use an absolute path if the project is elsewhere):
 
    ```jsonc
@@ -15,6 +15,8 @@ A private, opt-in Effect server plugin for browsing session history. It requires
    ```
 
 3. Open the configured project with that host. In a development checkout containing the host change, `bun run dev --standalone` runs against a private server. Ask the agent to search earlier sessions for a phrase, then open a match. Remove the config entry to disable the plugin.
+
+To verify without a model, run `bun run --cwd packages/core test test/plugin/session-search-example.test.ts` from the repository root. The test loads this package through project config and calls the tools against isolated session history.
 
 ## Tools
 

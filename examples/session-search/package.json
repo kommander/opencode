@@ -3,6 +3,9 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "scripts": {
+    "typecheck": "bun check --no-script"
+  },
   "exports": {
     ".": "./index.ts"
   },
